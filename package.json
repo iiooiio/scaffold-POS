@@ -1,0 +1,36 @@
+{
+  "name": "pos-electron",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "dist:win": "electron-builder --win",
+    "dist:win-portable": "electron-builder --win dir"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "node-thermal-printer": "^4.4.4"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "@electron/rebuild": "^3.6.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.tuempresa.pos",
+    "productName": "POS",
+    "files": [
+      "src/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

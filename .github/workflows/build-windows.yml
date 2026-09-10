@@ -1,0 +1,39 @@
+name: Build Windows installer
+
+# Se dispara al hacer push de un tag tipo v0.1.0, o manualmente desde la pestaña Actions.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm install
+        working-directory: pos-electron
+
+      - name: Compilar módulo nativo (better-sqlite3) para Electron
+        run: npm run rebuild
+        working-directory: pos-electron
+
+      - name: Generar instalador Windows (NSIS)
+        run: npm run dist:win
+        working-directory: pos-electron
+
+      - name: Subir instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: pos-windows-installer
+          path: pos-electron/dist/*.exe
