@@ -37,7 +37,9 @@ function getDb() {
       local_ticket TEXT NOT NULL,      -- ej. CAJA1-000042
       register_id TEXT NOT NULL,
       payload_json TEXT NOT NULL,      -- body listo para POST /orders de Woo
-      status TEXT NOT NULL DEFAULT 'pending', -- pending | synced | error
+      display_items_json TEXT,         -- [{name, quantity, price}] para mostrar en UI de errores
+      total REAL,
+      status TEXT NOT NULL DEFAULT 'pending', -- pending | synced | error | resolved_manually
       wc_order_id INTEGER,
       error_message TEXT,
       created_at TEXT NOT NULL,
@@ -49,6 +51,15 @@ function getDb() {
       value INTEGER NOT NULL DEFAULT 0
     );
   `);
+
+  // Migración simple para DBs creadas antes de agregar estas columnas.
+  const existingCols = db.prepare(`PRAGMA table_info(orders_queue)`).all().map((c) => c.name);
+  if (!existingCols.includes('display_items_json')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN display_items_json TEXT`);
+  }
+  if (!existingCols.includes('total')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN total REAL`);
+  }
 
   return db;
 }
