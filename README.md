@@ -113,9 +113,12 @@ externo fijo, etc.) — pendiente de decidir según cómo lo vayas a distribuir.
 - **Buffer de stock entre cajas** — si dos cajas venden el mismo SKU offline al mismo
   tiempo, pueden sobrevender. No hay lógica de reserva/buffer todavía; es una decisión
   de negocio pendiente (ver conversación previa).
-- **Manejo de errores de sync en UI** — `getErroredOrders()` existe en el backend, pero
-  la UI mínima no tiene pantalla para revisar/resolver órdenes en estado `error`. Hace
-  falta antes de producción, para no perder ventas silenciosamente.
+- **Manejo de errores de sync en UI** — ✅ resuelto: hay un panel en la UI mínima que
+  lista órdenes en estado `error`, con botones "Reintentar" (vuelve a intentar el POST a
+  WooCommerce) y "Marcar resuelto manual" (las saca de la cola sin crearlas en Woo, para
+  cuando el cajero ya las resolvió por fuera — ej. las capturó a mano en wp-admin). El
+  auto-sync de fondo YA NO reintenta órdenes en error solo; eso es a propósito, según la
+  política de stock acordada (sin buffer, sobreventa se resuelve manual).
 - **Clientes** — no hay tabla ni sync de customers todavía.
 - **Multi-pago / cambio** — el checkout asume pago simple en efectivo, sin cálculo de
   cambio ni pagos mixtos.
