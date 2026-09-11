@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
 const { getDb } = require('../db/init');
-const { fetchAllProducts } = require('./woo-client');
+const { fetchAllProducts, fetchProductVariations } = require('./woo-client');
 
 const META_KEY = 'products_last_sync';
 const IMAGES_DIR = path.join(app.getPath('userData'), 'product-images');
@@ -45,29 +45,76 @@ function upsertProduct(db, p) {
   });
 }
 
-// Descarga la primera imagen del producto a disco, para que se vea aunque no haya
-// internet después. Se llama solo para productos que cambiaron en este sync
-// (ya vienen filtrados por modified_after), así que no vuelve a bajar todo cada vez.
+// Descarga una imagen a disco y actualiza image_local_path en la tabla indicada.
+// Genérica porque la usan tanto products como product_variations.
 // NOTA: descarga secuencial, sin reintentos ni límite de concurrencia -- en un catálogo
 // grande con muchas imágenes nuevas, el primer sync puede tardar. No lo he medido.
-async function downloadProductImage(db, p) {
-  const image = p.images && p.images[0];
-  if (!image || !image.src) return;
+async function downloadImage(db, { table, id, imageSrc }) {
+  if (!imageSrc) return;
 
   try {
-    const res = await fetch(image.src);
+    const res = await fetch(imageSrc);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const ext = path.extname(new URL(image.src).pathname) || '.jpg';
-    const filePath = path.join(IMAGES_DIR, `${p.id}${ext}`);
+    const ext = path.extname(new URL(imageSrc).pathname) || '.jpg';
+    const filePath = path.join(IMAGES_DIR, `${table}-${id}${ext}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     fs.writeFileSync(filePath, buffer);
 
-    db.prepare(`UPDATE products SET image_local_path = ? WHERE id = ?`).run(filePath, p.id);
+    db.prepare(`UPDATE ${table} SET image_local_path = ? WHERE id = ?`).run(filePath, id);
   } catch (err) {
-    // No tumba el sync completo por una imagen que falló -- el producto se sincroniza
+    // No tumba el sync completo por una imagen que falló -- el registro se sincroniza
     // igual, solo se queda sin imagen local esta vez.
-    console.error(`[imagen] fallo al descargar producto ${p.id}:`, err.message);
+    console.error(`[imagen] fallo al descargar ${table} ${id}:`, err.message);
+  }
+}
+
+function upsertVariation(db, v) {
+  db.prepare(`
+    INSERT INTO product_variations (id, parent_id, sku, price, regular_price, sale_price,
+                                     manage_stock, stock_quantity, attributes_json, raw_json, updated_at)
+    VALUES (@id, @parent_id, @sku, @price, @regular_price, @sale_price,
+            @manage_stock, @stock_quantity, @attributes_json, @raw_json, @updated_at)
+    ON CONFLICT(id) DO UPDATE SET
+      sku = excluded.sku,
+      price = excluded.price,
+      regular_price = excluded.regular_price,
+      sale_price = excluded.sale_price,
+      manage_stock = excluded.manage_stock,
+      stock_quantity = excluded.stock_quantity,
+      attributes_json = excluded.attributes_json,
+      raw_json = excluded.raw_json,
+      updated_at = excluded.updated_at
+  `).run({
+    id: v.id,
+    parent_id: v.parent_id,
+    sku: v.sku || null,
+    price: v.price ? parseFloat(v.price) : null,
+    regular_price: v.regular_price ? parseFloat(v.regular_price) : null,
+    sale_price: v.sale_price ? parseFloat(v.sale_price) : null,
+    manage_stock: v.manage_stock ? 1 : 0,
+    stock_quantity: v.stock_quantity,
+    attributes_json: JSON.stringify(v.attributes || []),
+    raw_json: JSON.stringify(v),
+    updated_at: v.date_modified_gmt,
+  });
+}
+
+// Trae y guarda TODAS las variaciones de un producto variable, con sus imágenes.
+async function syncVariationsForProduct(db, productId) {
+  const variations = await fetchProductVariations(productId);
+
+  const tx = db.transaction((items) => {
+    for (const v of items) upsertVariation(db, { ...v, parent_id: productId });
+  });
+  tx(variations);
+
+  for (const v of variations) {
+    await downloadImage(db, {
+      table: 'product_variations',
+      id: v.id,
+      imageSrc: v.image && v.image.src,
+    });
   }
 }
 
@@ -89,7 +136,15 @@ async function syncCatalog() {
 
   // Fuera de la transacción porque son operaciones async (better-sqlite3 es síncrono).
   for (const p of products) {
-    await downloadProductImage(db, p);
+    await downloadImage(db, {
+      table: 'products',
+      id: p.id,
+      imageSrc: p.images && p.images[0] && p.images[0].src,
+    });
+
+    if (p.type === 'variable') {
+      await syncVariationsForProduct(db, p.id);
+    }
   }
 
   const now = new Date().toISOString();
@@ -113,4 +168,12 @@ function getLocalProducts({ search } = {}) {
   return db.prepare(`SELECT * FROM products WHERE status = 'publish' ORDER BY name ASC`).all();
 }
 
-module.exports = { syncCatalog, getLocalProducts };
+function getLocalVariations(parentId) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT * FROM product_variations WHERE parent_id = ? ORDER BY id ASC
+  `).all(parentId);
+  return rows.map((r) => ({ ...r, attributes: JSON.parse(r.attributes_json || '[]') }));
+}
+
+module.exports = { syncCatalog, getLocalProducts, getLocalVariations };
