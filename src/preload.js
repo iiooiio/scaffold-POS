@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { pathToFileURL } = require('url');
 
 contextBridge.exposeInMainWorld('pos', {
   getRegisterId: () => ipcRenderer.invoke('app:register-id'),
+  toFileUrl: (localPath) => (localPath ? pathToFileURL(localPath).href : null),
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
   checkout: (cartItems, paymentMethod) => ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod }),
