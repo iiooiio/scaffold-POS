@@ -16,7 +16,7 @@ function buildPrinter() {
   });
 }
 
-async function printTicket({ localTicket, cartItems, total, paymentMethod }) {
+async function printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo }) {
   const thermalPrinter = buildPrinter();
 
   const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
@@ -40,7 +40,11 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod }) {
   thermalPrinter.drawLine();
   thermalPrinter.alignRight();
   thermalPrinter.println(`TOTAL: $${total.toFixed(2)}`);
-  thermalPrinter.println(`Pago: ${paymentMethod}`);
+  thermalPrinter.println(`Pago: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
+  if (paymentMethod === 'cash' && cashInfo) {
+    thermalPrinter.println(`Recibido: $${cashInfo.received.toFixed(2)}`);
+    thermalPrinter.println(`Cambio: $${cashInfo.change.toFixed(2)}`);
+  }
   thermalPrinter.alignCenter();
   thermalPrinter.newLine();
   thermalPrinter.println('Gracias por su compra');
