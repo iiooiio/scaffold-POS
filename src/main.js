@@ -56,6 +56,7 @@ app.on('window-all-closed', () => {
 
 // ---- IPC: puente entre la UI (renderer) y la lógica de negocio ----
 
+ipcMain.handle('app:register-id', () => config.registerId);
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) => getLocalProducts({ search }));
 
