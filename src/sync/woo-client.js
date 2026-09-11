@@ -58,6 +58,25 @@ async function fetchAllProducts({ modifiedAfter } = {}) {
   return all;
 }
 
+// Trae TODAS las variaciones de un producto variable. A diferencia de fetchAllProducts,
+// no usa modified_after -- no verifiqué si el sub-endpoint de variaciones lo soporta
+// igual que /products, así que por seguridad se re-trae completo cada sync. Si tienes
+// productos con muchísimas variaciones esto puede ser lento; no lo medí.
+async function fetchProductVariations(productId) {
+  const perPage = 100;
+  let page = 1;
+  const all = [];
+
+  while (true) {
+    const batch = await wcGet(`/products/${productId}/variations`, { per_page: perPage, page });
+    all.push(...batch);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+
+  return all;
+}
+
 async function createOrder(orderPayload) {
   return wcPost('/orders', orderPayload);
 }
@@ -73,4 +92,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, createOrder, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, createOrder, isOnline };
