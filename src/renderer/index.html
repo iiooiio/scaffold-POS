@@ -162,13 +162,26 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 14px 12px;
+    padding: 10px;
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
     min-height: 96px;
     text-align: left;
+  }
+  .product-tile .p-image {
+    width: 100%;
+    height: 84px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    background: var(--bg);
+  }
+  .product-tile .p-image-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .product-tile:hover { border-color: var(--accent); }
   .product-tile:active { background: #F0F6F4; }
