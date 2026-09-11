@@ -30,6 +30,7 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     meta_data: metaData,
     line_items: cartItems.map((item) => ({
       product_id: item.product_id,
+      ...(item.variation_id ? { variation_id: item.variation_id } : {}),
       quantity: item.quantity,
     })),
   };
