@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pos', {
+  getRegisterId: () => ipcRenderer.invoke('app:register-id'),
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
   checkout: (cartItems, paymentMethod) => ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod }),
