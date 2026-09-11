@@ -10,9 +10,10 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash' }) {
   const localTicket = nextLocalTicket(config.registerId);
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
+  const paymentTitles = { cash: 'Efectivo', card: 'Tarjeta' };
   const payload = {
     payment_method: paymentMethod,
-    payment_method_title: paymentMethod === 'cash' ? 'Efectivo' : paymentMethod,
+    payment_method_title: paymentTitles[paymentMethod] || paymentMethod,
     set_paid: true,
     status: 'completed',
     customer_note: customerNote,
