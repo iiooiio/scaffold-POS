@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const config = require('./config');
 const { getDb } = require('./db/init');
-const { syncCatalog, getLocalProducts } = require('./sync/catalog-sync');
+const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
 const { printTicket } = require('./print/printer');
 
@@ -59,6 +59,7 @@ app.on('window-all-closed', () => {
 ipcMain.handle('app:register-id', () => config.registerId);
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) => getLocalProducts({ search }));
+ipcMain.handle('catalog:get-variations', async (_e, productId) => getLocalVariations(productId));
 
 ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo }) => {
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
