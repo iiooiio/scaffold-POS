@@ -61,13 +61,13 @@ ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) => getLocalProducts({ search }));
 ipcMain.handle('catalog:get-variations', async (_e, productId) => getLocalVariations(productId));
 
-ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo }) => {
+ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note }) => {
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const { localTicket } = queueOrder({ cartItems, paymentMethod, cashInfo });
+  const { localTicket } = queueOrder({ cartItems, paymentMethod, cashInfo, customerNote: note || '' });
 
   // Se imprime de inmediato, sin esperar a que sincronice con WooCommerce.
   try {
-    await printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo });
+    await printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo, note });
   } catch (err) {
     // La venta ya quedó guardada en la cola aunque falle la impresión.
     return { localTicket, total, printed: false, printError: err.message };
