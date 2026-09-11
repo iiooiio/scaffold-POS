@@ -24,7 +24,8 @@ function getDb() {
       stock_quantity REAL,
       status TEXT,                     -- publish, draft, etc.
       raw_json TEXT,                   -- respuesta completa de Woo por si hace falta luego
-      updated_at TEXT                  -- date_modified_gmt de Woo
+      updated_at TEXT,                 -- date_modified_gmt de Woo
+      image_local_path TEXT            -- ruta local al archivo ya descargado (para verla offline)
     );
 
     CREATE TABLE IF NOT EXISTS sync_meta (
@@ -59,6 +60,11 @@ function getDb() {
   }
   if (!existingCols.includes('total')) {
     db.exec(`ALTER TABLE orders_queue ADD COLUMN total REAL`);
+  }
+
+  const productCols = db.prepare(`PRAGMA table_info(products)`).all().map((c) => c.name);
+  if (!productCols.includes('image_local_path')) {
+    db.exec(`ALTER TABLE products ADD COLUMN image_local_path TEXT`);
   }
 
   return db;
