@@ -153,9 +153,9 @@
   #productGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
+    gap: 16px;
     overflow-y: auto;
-    padding-bottom: 20px;
+    padding: 12px 14px 24px 6px;
     align-content: start;
   }
   .product-tile {
@@ -463,6 +463,67 @@
     cursor: pointer;
     font-size: 13px;
   }
+
+  .p-variable-hint {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  /* ---------- Panel de variaciones (overlay) ---------- */
+  #variationOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  #variationOverlay.show { display: flex; }
+  #variationPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 420px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #variationPanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #variationPanel .subtitle { font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; }
+  #variationListBody {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .variation-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+  }
+  .variation-row:hover { border-color: var(--accent); }
+  .variation-row:disabled { opacity: 0.45; cursor: not-allowed; }
+  .variation-row .vr-label { flex: 1; font-weight: 500; }
+  .variation-row .vr-price { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .variation-row .vr-stock { font-size: 11px; color: var(--ink-soft); }
+  #btnCloseVariations {
+    margin-top: 14px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -534,6 +595,15 @@
       <div class="subtitle">No se subieron a WooCommerce. El ticket ya se imprimió.</div>
       <div id="errorListBody"></div>
       <button id="btnCloseErrors">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="variationOverlay">
+    <div id="variationPanel">
+      <h2 id="variationTitle">Producto</h2>
+      <div class="subtitle">Elige una opción</div>
+      <div id="variationListBody"></div>
+      <button id="btnCloseVariations">Cancelar</button>
     </div>
   </div>
 
