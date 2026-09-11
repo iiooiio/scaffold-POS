@@ -1,4 +1,4 @@
-let cart = []; // { product_id, name, price, quantity, manage_stock, stock_quantity }
+let cart = []; // { product_id, variation_id (null si es simple), name, price, quantity, manage_stock, stock_quantity }
 let selectedCategory = 'all';
 let paymentMethod = 'cash';
 let allProducts = []; // cache local para filtrar categorías sin volver a pedir a la DB
@@ -7,6 +7,10 @@ let allProducts = []; // cache local para filtrar categorías sin volver a pedir
 
 function money(n) {
   return `$${(n || 0).toFixed(2)}`;
+}
+
+function variationLabel(attributes) {
+  return (attributes || []).map((a) => a.option).filter(Boolean).join(', ');
 }
 
 function showToast(message, isWarn = false) {
@@ -86,8 +90,8 @@ function renderProductGrid() {
   }
 
   for (const p of filtered) {
-    const outOfStock = p.manage_stock && p.stock_quantity <= 0;
-    const cartItem = cart.find((i) => i.product_id === p.id);
+    const outOfStock = p.type !== 'variable' && p.manage_stock && p.stock_quantity <= 0;
+    const cartQty = cart.filter((i) => i.product_id === p.id).reduce((sum, i) => sum + i.quantity, 0);
 
     const tile = document.createElement('button');
     tile.className = `product-tile ${outOfStock ? 'no-stock' : ''}`;
@@ -99,30 +103,33 @@ function renderProductGrid() {
       : `<div class="p-image p-image-placeholder"></div>`;
 
     tile.innerHTML = `
-      ${cartItem ? `
+      ${cartQty > 0 ? `
         <div class="tile-badge">
-          <span class="tb-qty">${cartItem.quantity}</span>
+          <span class="tb-qty">${cartQty}</span>
           <span class="tb-remove" title="Quitar del carrito">×</span>
         </div>
       ` : ''}
       ${imgHtml}
       <div class="p-name">${p.name}</div>
       <div>
-        <div class="p-price">${money(p.price)}</div>
-        ${p.manage_stock ? `<div class="p-stock">${p.stock_quantity} disp.</div>` : ''}
+        ${p.type === 'variable'
+          ? '<div class="p-price p-variable-hint">Varias opciones</div>'
+          : `<div class="p-price">${money(p.price)}</div>`}
+        ${p.type !== 'variable' && p.manage_stock ? `<div class="p-stock">${p.stock_quantity} disp.</div>` : ''}
       </div>
     `;
 
-    // Click en el tile (fuera del badge) = agregar/incrementar.
-    tile.onclick = () => addToCart(p);
+    // Producto variable: abre selector de variación. Simple: agrega/incrementa directo.
+    tile.onclick = () => (p.type === 'variable' ? openVariationPicker(p) : addToCart(p));
 
-    // Click en la × del badge = quitar del carrito sin pasar por el panel derecho.
-    // stopPropagation para que no dispare también el addToCart del tile.
+    // Click en la × del badge = quitar del carrito. Para variables, quita TODAS sus
+    // variaciones de un jalón (simplificación -- para quitar solo una, usar el carrito).
     const removeBtn = tile.querySelector('.tb-remove');
     if (removeBtn) {
       removeBtn.onclick = (e) => {
         e.stopPropagation();
-        removeFromCart(p.id);
+        cart = cart.filter((i) => i.product_id !== p.id);
+        renderCart();
       };
     }
 
@@ -133,12 +140,13 @@ function renderProductGrid() {
 // ---------- Carrito ----------
 
 function addToCart(p) {
-  const existing = cart.find((i) => i.product_id === p.id);
+  const existing = cart.find((i) => i.product_id === p.id && !i.variation_id);
   if (existing) {
     existing.quantity += 1;
   } else {
     cart.push({
       product_id: p.id,
+      variation_id: null,
       name: p.name,
       price: p.price || 0,
       quantity: 1,
@@ -149,18 +157,36 @@ function addToCart(p) {
   renderCart();
 }
 
-function changeQty(productId, delta) {
-  const item = cart.find((i) => i.product_id === productId);
-  if (!item) return;
-  item.quantity += delta;
-  if (item.quantity <= 0) {
-    cart = cart.filter((i) => i.product_id !== productId);
+function addVariationToCart(parent, variation) {
+  const existing = cart.find((i) => i.variation_id === variation.id);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    cart.push({
+      product_id: parent.id,
+      variation_id: variation.id,
+      name: `${parent.name} — ${variationLabel(variation.attributes)}`,
+      price: variation.price || parent.price || 0,
+      quantity: 1,
+      manage_stock: variation.manage_stock,
+      stock_quantity: variation.stock_quantity,
+    });
   }
   renderCart();
 }
 
-function removeFromCart(productId) {
-  cart = cart.filter((i) => i.product_id !== productId);
+function changeQty(productId, variationId, delta) {
+  const item = cart.find((i) => i.product_id === productId && i.variation_id == variationId);
+  if (!item) return;
+  item.quantity += delta;
+  if (item.quantity <= 0) {
+    cart = cart.filter((i) => i !== item);
+  }
+  renderCart();
+}
+
+function removeFromCart(productId, variationId) {
+  cart = cart.filter((i) => !(i.product_id === productId && i.variation_id == variationId));
   renderCart();
 }
 
@@ -185,9 +211,9 @@ function renderCart() {
         <span class="cl-subtotal">${money(item.price * item.quantity)}</span>
         <button class="cl-remove" data-action="remove">×</button>
       `;
-      line.querySelector('[data-action="dec"]').onclick = () => changeQty(item.product_id, -1);
-      line.querySelector('[data-action="inc"]').onclick = () => changeQty(item.product_id, 1);
-      line.querySelector('[data-action="remove"]').onclick = () => removeFromCart(item.product_id);
+      line.querySelector('[data-action="dec"]').onclick = () => changeQty(item.product_id, item.variation_id, -1);
+      line.querySelector('[data-action="inc"]').onclick = () => changeQty(item.product_id, item.variation_id, 1);
+      line.querySelector('[data-action="remove"]').onclick = () => removeFromCart(item.product_id, item.variation_id);
       container.appendChild(line);
     }
   }
@@ -364,6 +390,53 @@ window.pos.onQueueUpdated((data) => {
     showToast(`Sync de cola: ${data.synced} enviadas, ${data.failed} con error.`, data.failed > 0);
   }
   refreshErrorBadge();
+});
+
+// ---------- Selector de variaciones (talla/color/etc.) ----------
+
+async function openVariationPicker(parent) {
+  const overlay = document.getElementById('variationOverlay');
+  const title = document.getElementById('variationTitle');
+  const body = document.getElementById('variationListBody');
+
+  title.textContent = parent.name;
+  body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando opciones...</div>';
+  overlay.classList.add('show');
+
+  let variations;
+  try {
+    variations = await window.pos.getVariations(parent.id);
+  } catch (err) {
+    body.innerHTML = `<div style="font-size:13px; color:var(--warn);">No se pudieron cargar las opciones: ${err.message}</div>`;
+    return;
+  }
+
+  if (variations.length === 0) {
+    body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Este producto no tiene variaciones sincronizadas. Prueba sincronizar el catálogo.</div>';
+    return;
+  }
+
+  body.innerHTML = '';
+  for (const v of variations) {
+    const outOfStock = v.manage_stock && v.stock_quantity <= 0;
+    const row = document.createElement('button');
+    row.className = 'variation-row';
+    row.disabled = outOfStock;
+    row.innerHTML = `
+      <span class="vr-label">${variationLabel(v.attributes) || '(sin atributos)'}</span>
+      <span class="vr-price">${money(v.price || parent.price)}</span>
+      ${v.manage_stock ? `<span class="vr-stock">${v.stock_quantity} disp.</span>` : ''}
+    `;
+    row.onclick = () => {
+      addVariationToCart(parent, v);
+      overlay.classList.remove('show');
+    };
+    body.appendChild(row);
+  }
+}
+
+document.getElementById('btnCloseVariations').addEventListener('click', () => {
+  document.getElementById('variationOverlay').classList.remove('show');
 });
 
 // ---------- Arranque ----------
