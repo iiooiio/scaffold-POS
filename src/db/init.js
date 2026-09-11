@@ -47,6 +47,21 @@ function getDb() {
       synced_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS product_variations (
+      id INTEGER PRIMARY KEY,          -- id de la variación en WooCommerce
+      parent_id INTEGER NOT NULL,      -- id del producto variable padre
+      sku TEXT,
+      price REAL,
+      regular_price REAL,
+      sale_price REAL,
+      manage_stock INTEGER,
+      stock_quantity REAL,
+      attributes_json TEXT,            -- [{name:"Talla", option:"M"}, ...]
+      image_local_path TEXT,
+      raw_json TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS counters (
       name TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
