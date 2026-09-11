@@ -3,24 +3,31 @@ const { createOrder, isOnline } = require('./woo-client');
 const config = require('../config');
 
 // cartItems: [{ product_id, name, price, quantity }]
+// cashInfo: { received, change } -- solo relevante si paymentMethod === 'cash'
 // Construye el payload en formato WooCommerce y lo guarda en la cola local.
 // Devuelve el ticket local de inmediato (no espera red) para poder imprimir ya.
-function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash' }) {
+function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo }) {
   const db = getDb();
   const localTicket = nextLocalTicket(config.registerId);
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   const paymentTitles = { cash: 'Efectivo', card: 'Tarjeta' };
+  const metaData = [
+    { key: '_pos_register_id', value: config.registerId },
+    { key: '_pos_local_ticket', value: localTicket },
+  ];
+  if (paymentMethod === 'cash' && cashInfo) {
+    metaData.push({ key: '_pos_cash_received', value: String(cashInfo.received) });
+    metaData.push({ key: '_pos_cash_change', value: String(cashInfo.change) });
+  }
+
   const payload = {
     payment_method: paymentMethod,
     payment_method_title: paymentTitles[paymentMethod] || paymentMethod,
     set_paid: true,
     status: 'completed',
     customer_note: customerNote,
-    meta_data: [
-      { key: '_pos_register_id', value: config.registerId },
-      { key: '_pos_local_ticket', value: localTicket },
-    ],
+    meta_data: metaData,
     line_items: cartItems.map((item) => ({
       product_id: item.product_id,
       quantity: item.quantity,
