@@ -13,6 +13,23 @@ function variationLabel(attributes) {
   return (attributes || []).map((a) => a.option).filter(Boolean).join(', ');
 }
 
+// Sugiere montos de efectivo según el total: el exacto, más los billetes comunes en MXN
+// que alcanzan a cubrirlo, más un par de redondeos (a 50/100/500) para totales grandes.
+function quickCashAmounts(total) {
+  if (total <= 0) return [];
+  const bills = [20, 50, 100, 200, 500, 1000];
+  const roundUp = (n, step) => Math.ceil(n / step) * step;
+
+  const options = new Set([Math.ceil(total)]);
+  for (const bill of bills) {
+    if (bill >= total) options.add(bill);
+  }
+  options.add(roundUp(total, 50));
+  options.add(roundUp(total, 100));
+
+  return [...options].filter((a) => a >= total).sort((a, b) => a - b).slice(0, 5);
+}
+
 function showToast(message, isWarn = false) {
   const toast = document.getElementById('toast');
   toast.textContent = message;
@@ -262,10 +279,32 @@ function updateChangeAndCheckoutState() {
   document.getElementById('changeRow').classList.toggle('insufficient', insufficient);
   receivedInput.classList.toggle('insufficient', insufficient && receivedInput.value !== '');
 
+  renderCashPills(total, received);
+
   btn.disabled = cart.length === 0 || insufficient;
 }
 
+function renderCashPills(total, currentReceived) {
+  const container = document.getElementById('cashPills');
+  container.innerHTML = '';
+  for (const amount of quickCashAmounts(total)) {
+    const pill = document.createElement('button');
+    pill.className = `cash-pill ${amount === currentReceived ? 'selected' : ''}`;
+    pill.textContent = money(amount);
+    pill.onclick = () => {
+      document.getElementById('cashReceived').value = amount;
+      updateChangeAndCheckoutState();
+    };
+    container.appendChild(pill);
+  }
+}
+
 document.getElementById('cashReceived').addEventListener('input', updateChangeAndCheckoutState);
+
+document.getElementById('noteCheckbox').addEventListener('change', (e) => {
+  document.getElementById('noteText').classList.toggle('show', e.target.checked);
+  if (!e.target.checked) document.getElementById('noteText').value = '';
+});
 
 document.getElementById('btnCheckout').addEventListener('click', async () => {
   if (cart.length === 0) return;
@@ -276,9 +315,11 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   const total = getTotal();
   const received = paymentMethod === 'cash' ? parseFloat(document.getElementById('cashReceived').value) || 0 : total;
   const change = paymentMethod === 'cash' ? received - total : 0;
+  const noteChecked = document.getElementById('noteCheckbox').checked;
+  const note = noteChecked ? document.getElementById('noteText').value.trim() : '';
 
   try {
-    const result = await window.pos.checkout(cart, paymentMethod, { received, change });
+    const result = await window.pos.checkout(cart, paymentMethod, { received, change }, note);
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -288,6 +329,9 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
     );
     cart = [];
     document.getElementById('cashReceived').value = '';
+    document.getElementById('noteCheckbox').checked = false;
+    document.getElementById('noteText').value = '';
+    document.getElementById('noteText').classList.remove('show');
     renderCart();
   } catch (err) {
     showToast(`Error al cobrar: ${err.message}`, true);
