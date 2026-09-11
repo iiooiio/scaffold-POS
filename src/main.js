@@ -3,7 +3,7 @@ const path = require('path');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts } = require('./sync/catalog-sync');
-const { queueOrder, flushPendingOrders, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
+const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
 const { printTicket } = require('./print/printer');
 
 let mainWindow;
@@ -77,3 +77,5 @@ ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod }) => {
 ipcMain.handle('queue:sync-now', async () => flushPendingOrders());
 ipcMain.handle('queue:summary', async () => getQueueSummary());
 ipcMain.handle('queue:errors', async () => getErroredOrders());
+ipcMain.handle('queue:retry-order', async (_e, orderId) => retryOrder(orderId));
+ipcMain.handle('queue:resolve-manually', async (_e, { orderId, note }) => resolveManually(orderId, note));
