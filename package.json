@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "dist:win": "electron-builder --win",
+    "dist:win": "electron-builder --win --publish never",
     "dist:win-portable": "electron-builder --win dir"
   },
   "dependencies": {
