@@ -87,18 +87,38 @@ function renderProductGrid() {
 
   for (const p of filtered) {
     const outOfStock = p.manage_stock && p.stock_quantity <= 0;
+    const cartItem = cart.find((i) => i.product_id === p.id);
 
     const tile = document.createElement('button');
     tile.className = `product-tile ${outOfStock ? 'no-stock' : ''}`;
     tile.disabled = outOfStock;
     tile.innerHTML = `
+      ${cartItem ? `
+        <div class="tile-badge">
+          <span class="tb-qty">${cartItem.quantity}</span>
+          <span class="tb-remove" title="Quitar del carrito">×</span>
+        </div>
+      ` : ''}
       <div class="p-name">${p.name}</div>
       <div>
         <div class="p-price">${money(p.price)}</div>
         ${p.manage_stock ? `<div class="p-stock">${p.stock_quantity} disp.</div>` : ''}
       </div>
     `;
+
+    // Click en el tile (fuera del badge) = agregar/incrementar.
     tile.onclick = () => addToCart(p);
+
+    // Click en la × del badge = quitar del carrito sin pasar por el panel derecho.
+    // stopPropagation para que no dispare también el addToCart del tile.
+    const removeBtn = tile.querySelector('.tb-remove');
+    if (removeBtn) {
+      removeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromCart(p.id);
+      };
+    }
+
     grid.appendChild(tile);
   }
 }
@@ -168,6 +188,8 @@ function renderCart() {
   const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
   document.getElementById('totalAmount').textContent = money(total);
   document.getElementById('btnCheckout').disabled = cart.length === 0;
+
+  renderProductGrid(); // mantiene el badge de cantidad del grid sincronizado
 }
 
 // ---------- Pago y checkout ----------
