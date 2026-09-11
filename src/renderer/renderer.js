@@ -92,6 +92,12 @@ function renderProductGrid() {
     const tile = document.createElement('button');
     tile.className = `product-tile ${outOfStock ? 'no-stock' : ''}`;
     tile.disabled = outOfStock;
+
+    const imgSrc = p.image_local_path ? window.pos.toFileUrl(p.image_local_path) : null;
+    const imgHtml = imgSrc
+      ? `<img class="p-image" src="${imgSrc}" alt="" onerror="this.style.display='none'" />`
+      : `<div class="p-image p-image-placeholder"></div>`;
+
     tile.innerHTML = `
       ${cartItem ? `
         <div class="tile-badge">
@@ -99,6 +105,7 @@ function renderProductGrid() {
           <span class="tb-remove" title="Quitar del carrito">×</span>
         </div>
       ` : ''}
+      ${imgHtml}
       <div class="p-name">${p.name}</div>
       <div>
         <div class="p-price">${money(p.price)}</div>
