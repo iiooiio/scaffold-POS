@@ -15,6 +15,12 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   const metaData = [
     { key: '_pos_register_id', value: config.registerId },
     { key: '_pos_local_ticket', value: localTicket },
+    // Para que la columna Origin/Atribución de WooCommerce no marque estas órdenes
+    // como "Online" -- basado en la documentación de meta keys de Order Attribution
+    // (_wc_order_attribution_*), no verificado contra un sitio real.
+    { key: '_wc_order_attribution_source_type', value: 'utm' },
+    { key: '_wc_order_attribution_utm_source', value: `pos-${config.registerId}` },
+    { key: '_wc_order_attribution_utm_medium', value: 'pos' },
   ];
   if (paymentMethod === 'cash' && cashInfo) {
     metaData.push({ key: '_pos_cash_received', value: String(cashInfo.received) });
