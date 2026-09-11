@@ -69,6 +69,63 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
 window.pos.onQueueUpdated((data) => {
   const status = document.getElementById('status');
   status.textContent = `Sync de cola: ${data.synced} enviadas, ${data.failed} con error.`;
+  loadErrors();
 });
+
+async function loadErrors() {
+  const errors = await window.pos.getQueueErrors();
+  const list = document.getElementById('errorList');
+  list.innerHTML = '';
+
+  if (errors.length === 0) {
+    list.innerHTML = '<p style="color:#666; font-size:0.85em;">Sin errores pendientes.</p>';
+    return;
+  }
+
+  for (const order of errors) {
+    const div = document.createElement('div');
+    div.className = 'error-order';
+
+    const itemsText = order.display_items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
+    div.innerHTML = `
+      <strong>${order.local_ticket}</strong> — $${order.total?.toFixed(2) ?? '?'}<br>
+      ${itemsText}
+      <div class="msg">${order.error_message}</div>
+    `;
+
+    const btnRetry = document.createElement('button');
+    btnRetry.textContent = 'Reintentar';
+    btnRetry.onclick = async () => {
+      btnRetry.disabled = true;
+      btnRetry.textContent = 'Reintentando...';
+      try {
+        await window.pos.retryOrder(order.id);
+      } catch (err) {
+        alert(`No se pudo reintentar: ${err.message}`);
+      }
+      loadErrors();
+    };
+
+    const btnResolve = document.createElement('button');
+    btnResolve.textContent = 'Marcar resuelto manual';
+    btnResolve.onclick = async () => {
+      const note = prompt('¿Cómo se resolvió? (opcional, queda en el registro)') || '';
+      try {
+        await window.pos.resolveManually(order.id, note);
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+      }
+      loadErrors();
+    };
+
+    div.appendChild(btnRetry);
+    div.appendChild(btnResolve);
+    list.appendChild(div);
+  }
+}
+
+// Revisa errores al abrir y cada 15s (además de cuando el auto-sync reporta cambios).
+loadErrors();
+setInterval(loadErrors, 15000);
 
 loadProducts();
