@@ -192,9 +192,8 @@ function renderCart() {
     }
   }
 
-  const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  document.getElementById('totalAmount').textContent = money(total);
-  document.getElementById('btnCheckout').disabled = cart.length === 0;
+  document.getElementById('totalAmount').textContent = money(getTotal());
+  updateChangeAndCheckoutState();
 
   renderProductGrid(); // mantiene el badge de cantidad del grid sincronizado
 }
@@ -206,8 +205,41 @@ document.querySelectorAll('.pay-btn').forEach((btn) => {
     paymentMethod = btn.dataset.method;
     document.querySelectorAll('.pay-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
+    document.getElementById('cashRow').classList.toggle('show', paymentMethod === 'cash');
+    updateChangeAndCheckoutState();
   };
 });
+
+function getTotal() {
+  return cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+}
+
+// Calcula el cambio en vivo y bloquea "Cobrar" si el efectivo recibido no alcanza.
+// Con tarjeta no aplica -- se asume que se cobra el monto exacto en la terminal.
+function updateChangeAndCheckoutState() {
+  const btn = document.getElementById('btnCheckout');
+  const total = getTotal();
+
+  if (paymentMethod !== 'cash') {
+    document.getElementById('changeRow').classList.remove('insufficient');
+    document.getElementById('changeAmount').textContent = '';
+    btn.disabled = cart.length === 0;
+    return;
+  }
+
+  const receivedInput = document.getElementById('cashReceived');
+  const received = parseFloat(receivedInput.value) || 0;
+  const change = received - total;
+  const insufficient = received < total;
+
+  document.getElementById('changeAmount').textContent = money(Math.max(change, 0));
+  document.getElementById('changeRow').classList.toggle('insufficient', insufficient);
+  receivedInput.classList.toggle('insufficient', insufficient && receivedInput.value !== '');
+
+  btn.disabled = cart.length === 0 || insufficient;
+}
+
+document.getElementById('cashReceived').addEventListener('input', updateChangeAndCheckoutState);
 
 document.getElementById('btnCheckout').addEventListener('click', async () => {
   if (cart.length === 0) return;
@@ -215,8 +247,12 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Procesando...';
 
+  const total = getTotal();
+  const received = paymentMethod === 'cash' ? parseFloat(document.getElementById('cashReceived').value) || 0 : total;
+  const change = paymentMethod === 'cash' ? received - total : 0;
+
   try {
-    const result = await window.pos.checkout(cart, paymentMethod);
+    const result = await window.pos.checkout(cart, paymentMethod, { received, change });
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -225,13 +261,14 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
       !result.printed
     );
     cart = [];
+    document.getElementById('cashReceived').value = '';
     renderCart();
   } catch (err) {
     showToast(`Error al cobrar: ${err.message}`, true);
   }
 
   btn.textContent = 'Cobrar e imprimir';
-  btn.disabled = cart.length === 0;
+  updateChangeAndCheckoutState();
 });
 
 // ---------- Sincronización de catálogo ----------
