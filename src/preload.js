@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('pos', {
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
   getVariations: (productId) => ipcRenderer.invoke('catalog:get-variations', productId),
-  checkout: (cartItems, paymentMethod, cashInfo) => ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo }),
+  checkout: (cartItems, paymentMethod, cashInfo, note) => ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo, note }),
   syncQueueNow: () => ipcRenderer.invoke('queue:sync-now'),
   getQueueSummary: () => ipcRenderer.invoke('queue:summary'),
   getQueueErrors: () => ipcRenderer.invoke('queue:errors'),
