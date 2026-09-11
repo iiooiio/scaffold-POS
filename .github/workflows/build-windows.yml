@@ -22,18 +22,15 @@ jobs:
 
       - name: Instalar dependencias
         run: npm install
-        working-directory: pos-electron
 
       - name: Compilar módulo nativo (better-sqlite3) para Electron
         run: npm run rebuild
-        working-directory: pos-electron
 
       - name: Generar instalador Windows (NSIS)
         run: npm run dist:win
-        working-directory: pos-electron
 
       - name: Subir instalador como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: pos-windows-installer
-          path: pos-electron/dist/*.exe
+          path: dist/*.exe
