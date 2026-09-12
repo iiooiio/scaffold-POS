@@ -53,6 +53,16 @@ function createWindow() {
   if (!app.isPackaged) mainWindow.webContents.openDevTools();
 }
 
+// Aplica el ajuste global de precios (config.priceAdjustmentPercent). Se hace aquí, en
+// un solo lugar, para que catálogo, variaciones, escaneo y carrito usen exactamente el
+// mismo precio y no haya forma de que el ticket y la orden difieran.
+function adjustPrice(price) {
+  if (price === null || price === undefined) return price;
+  const pct = config.priceAdjustmentPercent || 0;
+  if (!pct) return price;
+  return Math.round(price * (1 + pct / 100) * 100) / 100;
+}
+
 // Convierte una ruta local a file:// para que el renderer pueda mostrarla.
 // Vive aquí y no en el preload porque el preload corre sandboxed (ver preload.js).
 function toFileUrl(localPath) {
@@ -152,13 +162,25 @@ ipcMain.handle('config:save', (_e, values) => {
   config.saveConfig(values);
   return { values: config.getEditableConfig(), isConfigured: config.isConfigured() };
 });
-ipcMain.handle('catalog:find-by-sku', (_e, sku) => findBySku(sku));
+ipcMain.handle('catalog:find-by-sku', (_e, sku) => {
+  const match = findBySku(sku);
+  return match ? { ...match, price: adjustPrice(match.price) } : null;
+});
+ipcMain.handle('app:price-adjustment', () => config.priceAdjustmentPercent);
 ipcMain.handle('app:logo-url', () => toFileUrl(logoLocalPath));
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) =>
-  getLocalProducts({ search }).map((p) => ({ ...p, image_url: toFileUrl(p.image_local_path) })));
+  getLocalProducts({ search }).map((p) => ({
+    ...p,
+    price: adjustPrice(p.price),
+    image_url: toFileUrl(p.image_local_path),
+  })));
 ipcMain.handle('catalog:get-variations', async (_e, productId) =>
-  getLocalVariations(productId).map((v) => ({ ...v, image_url: toFileUrl(v.image_local_path) })));
+  getLocalVariations(productId).map((v) => ({
+    ...v,
+    price: adjustPrice(v.price),
+    image_url: toFileUrl(v.image_local_path),
+  })));
 ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers({ search }));
 ipcMain.handle('customers:sync-now', async () => syncCustomers());
 
@@ -225,6 +247,9 @@ ipcMain.handle('order:cancel', async (_e, { orderId, reason }) => {
 
   const order = getRecentOrders(200).find((o) => o.id === orderId);
   if (!order) throw new Error('Venta no encontrada');
+  if (!order.cash_session_id) {
+    throw new Error('Esta venta es anterior al control de efectivo y no tiene turno asignado, así que no se puede cancelar sin descuadrar el corte. Registra un retiro en el panel de Caja.');
+  }
   if (order.cash_session_id !== session.id) {
     throw new Error('Solo se pueden cancelar ventas del turno actual. Para ventas de turnos anteriores, registra un retiro en el panel de Caja.');
   }
