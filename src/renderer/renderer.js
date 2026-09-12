@@ -4,6 +4,22 @@ let paymentMethod = 'cash';
 let selectedCustomer = null; // { id, first_name, last_name, email, phone }
 let allProducts = []; // cache local para filtrar categorías sin volver a pedir a la DB
 
+// Marca qué se agregó al carrito hace un instante, para animarlo. renderCart() y
+// renderProductGrid() re-dibujan todo, así que la animación se aplica por clase en cada
+// render mientras la marca siga fresca (no con setTimeout sobre un nodo que se destruye).
+let lastAdded = null; // { product_id, variation_id, at }
+const ADD_ANIM_MS = 500;
+
+function markAdded(product_id, variation_id = null) {
+  lastAdded = { product_id, variation_id, at: Date.now() };
+}
+
+function isJustAdded(product_id, variation_id = null) {
+  if (!lastAdded) return false;
+  if (Date.now() - lastAdded.at > ADD_ANIM_MS) return false;
+  return lastAdded.product_id === product_id && lastAdded.variation_id == variation_id;
+}
+
 // ---------- Utilidades ----------
 
 function money(n) {
@@ -112,7 +128,9 @@ function renderProductGrid() {
     const cartQty = cart.filter((i) => i.product_id === p.id).reduce((sum, i) => sum + i.quantity, 0);
 
     const tile = document.createElement('button');
-    tile.className = `product-tile ${outOfStock ? 'no-stock' : ''}`;
+    const justAdded = cart.some((i) => i.product_id === p.id) && isJustAdded(p.id, null)
+      || (p.type === 'variable' && lastAdded?.product_id === p.id && Date.now() - lastAdded.at <= ADD_ANIM_MS);
+    tile.className = `product-tile ${outOfStock ? 'no-stock' : ''} ${justAdded ? 'just-added' : ''}`;
     tile.disabled = outOfStock;
 
     const imgHtml = p.image_url
@@ -171,6 +189,7 @@ function addToCart(p) {
       stock_quantity: p.stock_quantity,
     });
   }
+  markAdded(p.id, null);
   renderCart();
 }
 
@@ -189,6 +208,7 @@ function addVariationToCart(parent, variation) {
       stock_quantity: variation.stock_quantity,
     });
   }
+  markAdded(parent.id, variation.id);
   renderCart();
 }
 
@@ -217,7 +237,8 @@ function renderCart() {
   } else {
     for (const item of cart) {
       const line = document.createElement('div');
-      line.className = 'cart-line';
+      const fresh = isJustAdded(item.product_id, item.variation_id);
+      line.className = `cart-line ${fresh ? 'just-added' : ''}`;
       line.innerHTML = `
         <span class="cl-name">${item.name}</span>
         <span class="cl-qty">
@@ -235,7 +256,14 @@ function renderCart() {
     }
   }
 
-  document.getElementById('totalAmount').textContent = money(getTotal());
+  const totalEl = document.getElementById('totalAmount');
+  totalEl.textContent = money(getTotal());
+  if (lastAdded && Date.now() - lastAdded.at <= ADD_ANIM_MS) {
+    // Reiniciar la animación aunque el elemento no se haya recreado.
+    totalEl.classList.remove('pulse');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('pulse');
+  }
   updateChangeAndCheckoutState();
 
   renderProductGrid(); // mantiene el badge de cantidad del grid sincronizado
@@ -612,6 +640,7 @@ async function renderCashPanel() {
     <div class="cash-line"><span class="muted">Retiros</span><span>−${money(s.cashOut)}</span></div>
     <div class="cash-line total"><span>Esperado en cajón</span><span>${money(s.expected)}</span></div>
     <div class="cash-line"><span class="muted">Ventas con tarjeta (${s.cardSalesCount})</span><span class="muted">${money(s.cardSalesTotal)} · no afecta cajón</span></div>
+    ${s.cancelledCount > 0 ? `<div class="cash-line"><span class="muted">Canceladas (${s.cancelledCount})</span><span class="muted">${money(s.cancelledTotal)} · ya descontadas</span></div>` : ''}
 
     <div class="cash-section-title">Registrar movimiento</div>
     <input id="movAmount" type="number" step="0.01" min="0" placeholder="Monto" />
@@ -704,7 +733,12 @@ const STATUS_LABELS = {
   synced: 'sincronizada',
   error: 'con error',
   resolved_manually: 'resuelta manual',
+  cancelled_local: 'CANCELADA',
+  cancel_pending: 'CANCELADA (falta avisar a Woo)',
+  cancelled: 'CANCELADA',
 };
+
+const CANCELLED_STATUSES = ['cancelled_local', 'cancel_pending', 'cancelled'];
 
 async function renderSalesPanel() {
   const body = document.getElementById('salesBody');
@@ -719,8 +753,12 @@ async function renderSalesPanel() {
   }
 
   for (const o of orders) {
+    const isCancelled = CANCELLED_STATUSES.includes(o.status);
+    // Solo se puede cancelar si pertenece al turno abierto (ver main.js).
+    const canCancel = !isCancelled && cashSession && o.cash_session_id === cashSession.id;
+
     const row = document.createElement('div');
-    row.className = 'sale-row';
+    row.className = `sale-row ${isCancelled ? 'cancelled' : ''}`;
     const when = new Date(o.created_at).toLocaleString();
     const pay = o.payment_method === 'card' ? 'Tarjeta' : o.payment_method === 'cash' ? 'Efectivo' : '—';
     row.innerHTML = `
@@ -730,7 +768,9 @@ async function renderSalesPanel() {
       </div>
       <span class="sr-total">${money(o.total)}</span>
       <button data-action="reprint">Reimprimir</button>
+      ${canCancel ? '<button data-action="cancel" class="danger">Cancelar</button>' : ''}
     `;
+
     row.querySelector('[data-action="reprint"]').onclick = async (e) => {
       e.target.disabled = true;
       e.target.textContent = 'Imprimiendo...';
@@ -743,6 +783,29 @@ async function renderSalesPanel() {
       e.target.disabled = false;
       e.target.textContent = 'Reimprimir';
     };
+
+    const cancelBtn = row.querySelector('[data-action="cancel"]');
+    if (cancelBtn) {
+      cancelBtn.onclick = async () => {
+        const reason = prompt(`Cancelar ${o.local_ticket} por ${money(o.total)}.\n\nMotivo:`);
+        if (reason === null) return; // el cajero se arrepintió
+        try {
+          const result = await window.pos.cancelOrder(o.id, reason);
+          const extra = result.needsSync ? ' Se avisará a WooCommerce al sincronizar.' : '';
+          showToast(
+            result.printed
+              ? `Venta cancelada.${extra}`
+              : `Venta cancelada pero falló la impresión: ${result.printError}`,
+            !result.printed
+          );
+          renderSalesPanel();
+          refreshCashState();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      };
+    }
+
     body.appendChild(row);
   }
 }
@@ -844,6 +907,7 @@ async function handleScan(code) {
       stock_quantity: match.stock_quantity,
     });
   }
+  markAdded(match.product_id, match.variation_id);
   renderCart();
   showToast(`Agregado: ${match.name}`);
 }
