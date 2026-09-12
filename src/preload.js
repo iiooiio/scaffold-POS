@@ -26,5 +26,7 @@ contextBridge.exposeInMainWorld('pos', {
   addCashMovement: (movement) => ipcRenderer.invoke('cash:add-movement', movement),
   getCashMovements: () => ipcRenderer.invoke('cash:movements'),
   closeCashSession: (countedAmount) => ipcRenderer.invoke('cash:close', countedAmount),
+  getRecentOrders: () => ipcRenderer.invoke('order:recent'),
+  reprintOrder: (orderId) => ipcRenderer.invoke('order:reprint', orderId),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
