@@ -40,6 +40,8 @@ function getDb() {
       payload_json TEXT NOT NULL,      -- body listo para POST /orders de Woo
       display_items_json TEXT,         -- [{name, quantity, price}] para mostrar en UI de errores
       total REAL,
+      payment_method TEXT,             -- cash | card (para el corte de caja)
+      cash_session_id INTEGER,         -- sesión de caja a la que pertenece la venta
       status TEXT NOT NULL DEFAULT 'pending', -- pending | synced | error | resolved_manually
       wc_order_id INTEGER,
       error_message TEXT,
@@ -72,6 +74,27 @@ function getDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS cash_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      register_id TEXT NOT NULL,
+      opened_at TEXT NOT NULL,
+      opening_float REAL NOT NULL DEFAULT 0,  -- fondo de caja inicial
+      closed_at TEXT,
+      counted_amount REAL,                    -- lo que el cajero contó físicamente
+      expected_amount REAL,                   -- lo que el sistema calculó que debía haber
+      difference REAL,                        -- contado - esperado (negativo = faltante)
+      status TEXT NOT NULL DEFAULT 'open'     -- open | closed
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      type TEXT NOT NULL,                     -- in | out
+      amount REAL NOT NULL,
+      reason TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS counters (
       name TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
@@ -85,6 +108,14 @@ function getDb() {
   }
   if (!existingCols.includes('total')) {
     db.exec(`ALTER TABLE orders_queue ADD COLUMN total REAL`);
+  }
+  // Necesarias para el corte de caja: saber qué ventas fueron en efectivo y a qué
+  // sesión pertenecen, sin tener que parsear payload_json en cada consulta.
+  if (!existingCols.includes('payment_method')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN payment_method TEXT`);
+  }
+  if (!existingCols.includes('cash_session_id')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN cash_session_id INTEGER`);
   }
 
   const productCols = db.prepare(`PRAGMA table_info(products)`).all().map((c) => c.name);
