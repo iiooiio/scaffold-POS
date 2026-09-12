@@ -59,6 +59,13 @@ function reload() {
   // Positivo = recargo (ej. 10 sube todo 10%), negativo = descuento (ej. -5 baja 5%).
   // Dominio de los correos que se generan para clientes creados en el POS. WooCommerce
   // exige email único por cliente, pero en mostrador nadie lo pide.
+  // Cómo se marca el origen de la orden en WooCommerce.
+  //   'mobile_app' -> source type válido del enum de Woo, sin campos acompañantes.
+  //   'admin'      -> alternativa válida (creada desde el panel).
+  //   'none'       -> no manda nada de atribución (lo más seguro si algo se rompe).
+  // NO usar 'utm': hace que Woo intente renderizar utm_campaign/device_type/
+  // session_page_views y truena el detalle de la orden y el historial del cliente.
+  config.orderAttribution = get('ORDER_ATTRIBUTION', 'mobile_app');
   config.posEmailDomain = get('POS_EMAIL_DOMAIN', 'pos.com');
   config.priceAdjustmentPercent = parseFloat(get('PRICE_ADJUSTMENT_PERCENT', '0')) || 0;
   config.syncIntervalMs = parseInt(get('SYNC_INTERVAL_MS', '30000'), 10);
