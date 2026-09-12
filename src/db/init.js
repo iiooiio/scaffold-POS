@@ -44,6 +44,7 @@ function getDb() {
       cash_session_id INTEGER,         -- sesión de caja a la que pertenece la venta
       cancelled_at TEXT,
       cancel_reason TEXT,
+      customer_ref INTEGER,            -- customers.id local; el customer_id de Woo se resuelve al enviar
       -- pending | synced | error | resolved_manually
       -- cancelled_local  : cancelada sin haber llegado nunca a WooCommerce
       -- cancel_pending   : ya estaba en Woo; falta empujar la cancelación
@@ -71,11 +72,17 @@ function getDb() {
     );
 
     CREATE TABLE IF NOT EXISTS customers (
-      id INTEGER PRIMARY KEY,          -- id de WooCommerce
+      -- id es el identificador LOCAL y nunca cambia (las órdenes lo referencian).
+      -- Para clientes traídos de Woo, id == woo_id. Para clientes creados aquí sin
+      -- conexión, id es negativo temporal y woo_id se llena al sincronizar.
+      id INTEGER PRIMARY KEY,
+      woo_id INTEGER,
+      pending_sync INTEGER NOT NULL DEFAULT 0,
       first_name TEXT,
       last_name TEXT,
-      email TEXT,
+      email TEXT,                      -- generado desde el nombre si no se capturó uno
       phone TEXT,
+      whatsapp TEXT,                   -- para la integración futura con WAHA
       raw_json TEXT,
       updated_at TEXT
     );
@@ -128,6 +135,22 @@ function getDb() {
   }
   if (!existingCols.includes('cancel_reason')) {
     db.exec(`ALTER TABLE orders_queue ADD COLUMN cancel_reason TEXT`);
+  }
+
+  const customerCols = db.prepare(`PRAGMA table_info(customers)`).all().map((c) => c.name);
+  if (!customerCols.includes('woo_id')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN woo_id INTEGER`);
+    // Los que ya estaban vinieron de Woo, así que su id ES el de Woo.
+    db.exec(`UPDATE customers SET woo_id = id WHERE woo_id IS NULL`);
+  }
+  if (!customerCols.includes('whatsapp')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN whatsapp TEXT`);
+  }
+  if (!customerCols.includes('pending_sync')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN pending_sync INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!existingCols.includes('customer_ref')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN customer_ref INTEGER`);
   }
 
   const productCols = db.prepare(`PRAGMA table_info(products)`).all().map((c) => c.name);
