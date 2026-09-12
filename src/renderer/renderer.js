@@ -238,7 +238,7 @@ function renderCart() {
     for (const item of cart) {
       const line = document.createElement('div');
       const fresh = isJustAdded(item.product_id, item.variation_id);
-      line.className = `cart-line ${fresh ? 'just-added' : ''}`;
+      line.className = `cart-line ${fresh ? 'just-added' : ''} ${item.custom ? 'custom' : ''}`;
       line.innerHTML = `
         <span class="cl-name">${item.name}</span>
         <span class="cl-qty">
@@ -776,6 +776,7 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 // Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
 const OVERLAYS_TOP_FIRST = [
   'settingsOverlay',
+  'customOverlay',
   'cashOverlay',
   'salesOverlay',
   'customerOverlay',
@@ -897,6 +898,63 @@ document.getElementById('btnCloseSales').addEventListener('click', () => {
   document.getElementById('salesOverlay').classList.remove('show');
 });
 
+// ---------- Producto temporal ----------
+// No toca el catálogo ni la base: vive solo en el carrito de esta venta y se envía a
+// WooCommerce como fee_line (ver order-sync.js).
+//
+// Se le asigna un product_id negativo único para no tener que reescribir el manejo del
+// carrito, que indexa por product_id + variation_id. Ningún producto real tiene id
+// negativo, así que no hay colisión con el catálogo ni con el badge del grid.
+
+function openCustomProductModal() {
+  document.getElementById('cpName').value = '';
+  document.getElementById('cpPrice').value = '';
+  document.getElementById('cpQty').value = '1';
+  document.getElementById('customOverlay').classList.add('show');
+  document.getElementById('cpName').focus();
+}
+
+document.getElementById('btnAddCustom').addEventListener('click', openCustomProductModal);
+document.getElementById('btnCloseCustom').addEventListener('click', () => {
+  document.getElementById('customOverlay').classList.remove('show');
+});
+
+document.getElementById('btnCreateCustom').addEventListener('click', () => {
+  const name = document.getElementById('cpName').value.trim();
+  const price = parseFloat(document.getElementById('cpPrice').value);
+  const qty = parseInt(document.getElementById('cpQty').value, 10);
+
+  if (!name) {
+    showToast('Captura una descripción.', true);
+    return;
+  }
+  if (!(price >= 0) || Number.isNaN(price)) {
+    showToast('Captura un precio válido.', true);
+    return;
+  }
+  if (!(qty >= 1)) {
+    showToast('La cantidad debe ser al menos 1.', true);
+    return;
+  }
+
+  const syntheticId = -Date.now();
+  cart.push({
+    product_id: syntheticId,
+    variation_id: null,
+    name,
+    price,
+    quantity: qty,
+    custom: true,
+    manage_stock: 0,
+    stock_quantity: null,
+  });
+
+  markAdded(syntheticId, null);
+  renderCart();
+  document.getElementById('customOverlay').classList.remove('show');
+  showToast(`Agregado: ${name}`);
+});
+
 // ---------- Ajustes ----------
 
 const SETTINGS_FIELDS = {
@@ -1012,7 +1070,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show'
   );
   if (anyOverlayOpen) return;
 
