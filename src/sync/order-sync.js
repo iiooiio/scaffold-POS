@@ -1,5 +1,5 @@
 const { getDb, nextLocalTicket } = require('../db/init');
-const { createOrder, isOnline } = require('./woo-client');
+const { createOrder, cancelWooOrder, isOnline } = require('./woo-client');
 const config = require('../config');
 
 // cartItems: [{ product_id, name, price, quantity }]
@@ -153,7 +153,8 @@ function getErroredOrders() {
 function getRecentOrders(limit = 50) {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT id, local_ticket, total, payment_method, status, created_at
+    SELECT id, local_ticket, total, payment_method, status, created_at,
+           cash_session_id, cancelled_at, cancel_reason
     FROM orders_queue WHERE register_id = ?
     ORDER BY id DESC LIMIT ?
   `).all(config.registerId, limit);
@@ -188,6 +189,56 @@ function getOrderForReprint(orderId) {
   };
 }
 
+const CANCELLED_STATUSES = ['cancelled_local', 'cancel_pending', 'cancelled'];
+
+// Cancela una venta. Qué pasa depende de si ya llegó a WooCommerce o no:
+//   - nunca llegó (pending/error/resuelta manual) -> 'cancelled_local', nada que avisar
+//   - ya está en Woo ('synced')                   -> 'cancel_pending', se empuja al sincronizar
+// El dinero se devuelve al cliente en el momento; el efecto en el corte es inmediato
+// porque getSessionSummary excluye las canceladas (ver cash-session.js).
+function cancelOrder(orderId, reason = '') {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM orders_queue WHERE id = ?`).get(orderId);
+  if (!row) throw new Error(`Venta ${orderId} no encontrada`);
+  if (CANCELLED_STATUSES.includes(row.status)) throw new Error('Esta venta ya está cancelada');
+
+  const newStatus = row.status === 'synced' ? 'cancel_pending' : 'cancelled_local';
+
+  db.prepare(`
+    UPDATE orders_queue
+    SET status = ?, cancelled_at = ?, cancel_reason = ?
+    WHERE id = ?
+  `).run(newStatus, new Date().toISOString(), reason, orderId);
+
+  return { ...row, status: newStatus, needsSync: newStatus === 'cancel_pending' };
+}
+
+// Empuja a WooCommerce las cancelaciones de órdenes que ya existían allá.
+async function flushPendingCancellations() {
+  const db = getDb();
+  const pending = db.prepare(`
+    SELECT * FROM orders_queue WHERE status = 'cancel_pending' AND wc_order_id IS NOT NULL
+  `).all();
+
+  let cancelled = 0;
+  let failed = 0;
+
+  for (const row of pending) {
+    try {
+      await cancelWooOrder(row.wc_order_id);
+      db.prepare(`UPDATE orders_queue SET status = 'cancelled' WHERE id = ?`).run(row.id);
+      cancelled += 1;
+    } catch (err) {
+      // Se queda en 'cancel_pending' y se reintenta en el siguiente ciclo: la
+      // cancelación local ya es válida para el corte aunque Woo no responda.
+      console.error(`[cancelación] fallo en orden ${row.id}:`, err.message);
+      failed += 1;
+    }
+  }
+
+  return { attempted: pending.length, cancelled, failed };
+}
+
 module.exports = {
   queueOrder,
   flushPendingOrders,
@@ -197,4 +248,6 @@ module.exports = {
   getErroredOrders,
   getRecentOrders,
   getOrderForReprint,
+  cancelOrder,
+  flushPendingCancellations,
 };
