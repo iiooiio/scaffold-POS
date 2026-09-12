@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -10,6 +10,8 @@ const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSum
 const { syncCustomers, getLocalCustomers, createLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
 const { printTicket, printCashReport, printCancellation, printPartialRefund } = require('./print/printer');
 const cash = require('./cash/cash-session');
+const { createBackup, listBackups, backupDir } = require('./db/backup');
+const { cleanupCache, getCacheStats } = require('./db/cleanup');
 
 let mainWindow;
 let logoLocalPath = null;
@@ -83,6 +85,14 @@ function findCachedLogo() {
 
 app.whenReady().then(async () => {
   getDb(); // fuerza creación de tablas al arrancar
+
+  // Respaldo al arrancar: es el momento con menos escritura en curso y garantiza al
+  // menos un punto de retorno por sesión de trabajo.
+  createBackup('arranque').catch((err) => console.error('[respaldo] fallo al arrancar:', err.message));
+  // Y uno cada 6 horas, para turnos largos.
+  setInterval(() => {
+    createBackup('auto').catch((err) => console.error('[respaldo] fallo periódico:', err.message));
+  }, 6 * 60 * 60 * 1000);
 
   logoLocalPath = findCachedLogo();
   if (logoLocalPath) {
@@ -239,6 +249,15 @@ ipcMain.handle('cash:close', async (_e, countedAmount) => {
     return { ...summary, printed: false, printError: err.message };
   }
 });
+
+ipcMain.handle('maintenance:stats', () => ({
+  cache: getCacheStats(),
+  backups: listBackups().slice(0, 5),
+  backupDir: backupDir(),
+}));
+ipcMain.handle('maintenance:backup-now', async () => createBackup('manual'));
+ipcMain.handle('maintenance:cleanup', async () => cleanupCache());
+ipcMain.handle('maintenance:open-backups', async () => shell.openPath(backupDir()));
 
 ipcMain.handle('app:toggle-fullscreen', () => {
   if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
