@@ -47,13 +47,15 @@ function upsertProduct(db, p) {
 
 // Descarga una imagen a disco y actualiza image_local_path en la tabla indicada.
 // Genérica porque la usan tanto products como product_variations.
+// Manda un User-Agent explícito -- algunos hosts/CDNs de WordPress (Wordfence,
+// Cloudflare, etc.) bloquean requests sin uno.
 // NOTA: descarga secuencial, sin reintentos ni límite de concurrencia -- en un catálogo
 // grande con muchas imágenes nuevas, el primer sync puede tardar. No lo he medido.
 async function downloadImage(db, { table, id, imageSrc }) {
-  if (!imageSrc) return;
+  if (!imageSrc) return false;
 
   try {
-    const res = await fetch(imageSrc);
+    const res = await fetch(imageSrc, { headers: { 'User-Agent': 'pos-electron/0.1' } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const ext = path.extname(new URL(imageSrc).pathname) || '.jpg';
@@ -62,11 +64,47 @@ async function downloadImage(db, { table, id, imageSrc }) {
     fs.writeFileSync(filePath, buffer);
 
     db.prepare(`UPDATE ${table} SET image_local_path = ? WHERE id = ?`).run(filePath, id);
+    return true;
   } catch (err) {
     // No tumba el sync completo por una imagen que falló -- el registro se sincroniza
     // igual, solo se queda sin imagen local esta vez.
     console.error(`[imagen] fallo al descargar ${table} ${id}:`, err.message);
+    return false;
   }
+}
+
+// BUG REAL que encontramos: el sync es incremental (modified_after), así que un producto
+// que no cambió nunca vuelve a pasar por downloadImage(). Esto revisa TODA la tabla en
+// busca de registros con imagen conocida (raw_json) pero sin image_local_path, y
+// reintenta -- corre en cada sync, así que también se auto-repara de fallos de red
+// puntuales, no solo del bug original.
+async function backfillMissingImages(db) {
+  let ok = 0;
+  let failed = 0;
+
+  const missingProducts = db.prepare(`
+    SELECT id, raw_json FROM products WHERE image_local_path IS NULL AND raw_json IS NOT NULL
+  `).all();
+  for (const row of missingProducts) {
+    const raw = JSON.parse(row.raw_json);
+    const src = raw.images && raw.images[0] && raw.images[0].src;
+    if (!src) continue;
+    const success = await downloadImage(db, { table: 'products', id: row.id, imageSrc: src });
+    success ? ok++ : failed++;
+  }
+
+  const missingVariations = db.prepare(`
+    SELECT id, raw_json FROM product_variations WHERE image_local_path IS NULL AND raw_json IS NOT NULL
+  `).all();
+  for (const row of missingVariations) {
+    const raw = JSON.parse(row.raw_json);
+    const src = raw.image && raw.image.src;
+    if (!src) continue;
+    const success = await downloadImage(db, { table: 'product_variations', id: row.id, imageSrc: src });
+    success ? ok++ : failed++;
+  }
+
+  return { ok, failed };
 }
 
 function upsertVariation(db, v) {
@@ -147,13 +185,17 @@ async function syncCatalog() {
     }
   }
 
+  // Backfill SIEMPRE, no solo para los productos que cambiaron en este pase --
+  // ver comentario en backfillMissingImages sobre el bug del filtro incremental.
+  const imageResult = await backfillMissingImages(db);
+
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO sync_meta (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(META_KEY, now);
 
-  return { count: products.length, syncedAt: now };
+  return { count: products.length, syncedAt: now, imagesOk: imageResult.ok, imagesFailed: imageResult.failed };
 }
 
 function getLocalProducts({ search } = {}) {
