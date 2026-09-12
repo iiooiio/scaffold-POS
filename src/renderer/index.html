@@ -742,25 +742,41 @@
     font-size: 14px;
     margin-bottom: 8px;
   }
-  #cashPanel .cash-action-btn {
+  /* BUG CORREGIDO: esta clase estaba definida como "#cashPanel .cash-action-btn", así
+     que solo aplicaba dentro del panel de Caja. Los mismos botones en los modales de
+     cliente, producto temporal, descuento, devolución, ajustes y mantenimiento salían
+     SIN estilo (botones HTML crudos), y por eso rompían el diseño. */
+  .cash-action-btn {
     width: 100%;
     padding: 12px;
     border-radius: var(--radius);
-    border: none;
+    border: 1px solid var(--accent);
     background: var(--accent);
     color: #fff;
     font-size: 14px;
     font-weight: 700;
+    font-family: inherit;
     cursor: pointer;
     margin-top: 4px;
+    transition: background 0.12s ease, border-color 0.12s ease;
   }
-  #cashPanel .cash-action-btn.secondary {
-    background: var(--bg);
+  .cash-action-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .cash-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .cash-action-btn.secondary {
+    background: var(--surface);
     color: var(--ink);
-    border: 1px solid var(--border);
+    border-color: var(--border);
     font-weight: 500;
   }
-  #cashPanel .cash-action-btn.danger { background: var(--warn); }
+  .cash-action-btn.secondary:hover {
+    background: var(--bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .cash-action-btn.danger { background: var(--warn); border-color: var(--warn); }
+  .cash-action-btn.danger:hover { background: #9A4718; border-color: #9A4718; }
   .cash-row-2 { display: flex; gap: 8px; }
   .diff-ok { color: var(--accent); font-weight: 700; }
   .diff-bad { color: var(--warn); font-weight: 700; }
@@ -996,6 +1012,28 @@
     font-family: inherit;
   }
   #discountValue:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Acciones de modal en fila, con la destructiva a la izquierda como texto y la
+     confirmación a la derecha: antes estaban apiladas y pegadas, y "Quitar" se veía
+     con el mismo peso que "Aplicar". */
+  .modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .modal-actions .cash-action-btn { flex: 1; margin-top: 0; }
+  .btn-text-danger {
+    background: none;
+    border: none;
+    color: var(--warn);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 12px 4px;
+    white-space: nowrap;
+  }
+  .btn-text-danger:hover { text-decoration: underline; }
+
   #btnCloseDiscount {
     margin-top: 10px;
     align-self: flex-end;
@@ -1033,7 +1071,39 @@
     margin: 2px 0 6px;
   }
   #discountSummary.show { display: flex; }
-  #btnTicketDiscount.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  /* Botones utilitarios del carrito: afordancia de "agregar/modificar", deliberadamente
+     más ligeros que Cobrar para no competir con la acción principal. */
+  #cartTools {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .util-btn {
+    flex: 1;
+    padding: 9px 10px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  }
+  .util-btn:hover {
+    border-color: var(--accent);
+    border-style: solid;
+    color: var(--accent);
+    background: #F2F8F6;
+  }
+  .util-btn.active {
+    border-style: solid;
+    border-color: var(--accent);
+    background: #EAF3F0;
+    color: var(--accent);
+    font-weight: 600;
+  }
 
   #btnMaintenance {
     background: transparent;
@@ -1207,13 +1277,14 @@
         <button id="btnSelectCustomer">Cliente: Ninguno</button>
         <button id="btnClearCustomer" title="Quitar cliente">×</button>
       </div>
-      <button id="btnAddCustom" class="cash-action-btn secondary" style="margin-bottom:12px;">+ Producto temporal</button>
+      <div id="cartTools">
+        <button id="btnAddCustom" class="util-btn">＋ Producto temporal</button>
+        <button id="btnTicketDiscount" class="util-btn">％ Descuento</button>
+      </div>
 
       <div id="cartItems">
         <div id="cartEmpty">Toca un producto para agregarlo</div>
       </div>
-
-      <button id="btnTicketDiscount" class="cash-action-btn secondary" style="margin:4px 0 10px;">Descuento del ticket</button>
 
       <div id="paymentRow">
         <button class="pay-btn active" data-method="cash">Efectivo</button>
@@ -1352,8 +1423,10 @@
       <input id="discountValue" type="number" step="0.01" min="0" placeholder="0" />
       <div class="cash-line total"><span>Queda en</span><span id="discountPreview">$0.00</span></div>
 
-      <button id="btnApplyDiscount" class="cash-action-btn">Aplicar</button>
-      <button id="btnRemoveDiscount" class="cash-action-btn secondary">Quitar descuento</button>
+      <div class="modal-actions">
+        <button id="btnRemoveDiscount" class="btn-text-danger">Quitar descuento</button>
+        <button id="btnApplyDiscount" class="cash-action-btn">Aplicar</button>
+      </div>
       <button id="btnCloseDiscount">Cancelar</button>
     </div>
   </div>
