@@ -61,4 +61,52 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
   await thermalPrinter.execute();
 }
 
-module.exports = { printTicket };
+module.exports = { printTicket, printCashReport };
+
+// Imprime el corte de caja al cerrar el turno.
+async function printCashReport(summary) {
+  const thermalPrinter = buildPrinter();
+
+  const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
+  if (!isConnected) {
+    throw new Error('Impresora no detectada (revisa cable USB / PRINTER_INTERFACE en .env)');
+  }
+
+  const line = (label, value) => {
+    thermalPrinter.alignLeft();
+    thermalPrinter.println(`${label}: $${value.toFixed(2)}`);
+  };
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.println('*** CORTE DE CAJA ***');
+  thermalPrinter.println(summary.register_id);
+  thermalPrinter.drawLine();
+
+  thermalPrinter.alignLeft();
+  thermalPrinter.println(`Apertura: ${new Date(summary.opened_at).toLocaleString()}`);
+  thermalPrinter.println(`Cierre:   ${new Date(summary.closed_at).toLocaleString()}`);
+  thermalPrinter.drawLine();
+
+  line('Fondo inicial', summary.opening_float);
+  line(`Ventas efectivo (${summary.cashSalesCount})`, summary.cashSalesTotal);
+  line('Ingresos', summary.cashIn);
+  line('Retiros', summary.cashOut);
+  thermalPrinter.drawLine();
+
+  line('Esperado en cajon', summary.expected);
+  line('Contado', summary.counted_amount);
+  thermalPrinter.bold(true);
+  line('DIFERENCIA', summary.difference);
+  thermalPrinter.bold(false);
+
+  thermalPrinter.drawLine();
+  line(`Ventas tarjeta (${summary.cardSalesCount})`, summary.cardSalesTotal);
+  thermalPrinter.println('(no afecta el efectivo del cajon)');
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.newLine();
+  thermalPrinter.println('Firma: ____________________');
+  thermalPrinter.cut();
+
+  await thermalPrinter.execute();
+}
