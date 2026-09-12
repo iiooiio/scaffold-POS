@@ -38,15 +38,30 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
   thermalPrinter.drawLine();
 
   thermalPrinter.alignLeft();
+  let descuentoTotal = 0;
   for (const item of cartItems) {
+    const subtotal = item.line_subtotal ?? item.price * item.quantity;
+    const lineTotal = item.line_total ?? item.price * item.quantity;
+    descuentoTotal += subtotal - lineTotal;
+
     thermalPrinter.println(`${item.quantity}x ${item.name}`);
     thermalPrinter.alignRight();
-    thermalPrinter.println(`$${(item.price * item.quantity).toFixed(2)}`);
+    if (lineTotal < subtotal) {
+      // Se imprime el precio de lista tachado conceptualmente (sin tachado real en
+      // ESC/POS): primero el original, luego el cobrado.
+      thermalPrinter.println(`$${subtotal.toFixed(2)} -> $${lineTotal.toFixed(2)}`);
+    } else {
+      thermalPrinter.println(`$${lineTotal.toFixed(2)}`);
+    }
     thermalPrinter.alignLeft();
   }
 
   thermalPrinter.drawLine();
   thermalPrinter.alignRight();
+  if (descuentoTotal > 0.005) {
+    thermalPrinter.println(`Subtotal: $${(total + descuentoTotal).toFixed(2)}`);
+    thermalPrinter.println(`Descuento: -$${descuentoTotal.toFixed(2)}`);
+  }
   thermalPrinter.println(`TOTAL: $${total.toFixed(2)}`);
   thermalPrinter.println(`Pago: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
   if (paymentMethod === 'cash' && cashInfo) {
