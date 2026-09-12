@@ -1,5 +1,6 @@
 const { getDb, nextLocalTicket } = require('../db/init');
 const { createOrder, cancelWooOrder, isOnline } = require('./woo-client');
+const { resolveWooCustomerId } = require('./customer-sync');
 const config = require('../config');
 
 // cartItems: [{ product_id, name, price, quantity }]
@@ -33,7 +34,6 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     set_paid: true,
     status: 'completed',
     customer_note: customerNote,
-    ...(customerId ? { customer_id: customerId } : {}),
     meta_data: metaData,
     // subtotal/total explícitos: sin esto WooCommerce recalcula con SU precio de
     // catálogo e ignoraría el ajuste porcentual, dejando el ticket impreso y la orden
@@ -55,8 +55,8 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   db.prepare(`
     INSERT INTO orders_queue
       (local_ticket, register_id, payload_json, display_items_json, total,
-       payment_method, cash_session_id, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+       payment_method, cash_session_id, customer_ref, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `).run(
     localTicket,
     config.registerId,
@@ -65,6 +65,7 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     total,
     paymentMethod,
     cashSessionId,
+    customerId || null,
     new Date().toISOString()
   );
 
@@ -76,6 +77,17 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
 async function trySyncOrder(db, row) {
   try {
     const payload = JSON.parse(row.payload_json);
+
+    // El customer_id de Woo se resuelve AQUÍ, no al guardar la venta: si el cliente se
+    // creó sin conexión, su id de Woo no existía en ese momento.
+    if (row.customer_ref) {
+      const wooCustomerId = resolveWooCustomerId(row.customer_ref);
+      if (!wooCustomerId) {
+        throw new Error('El cliente de esta venta todavía no se ha creado en WooCommerce');
+      }
+      payload.customer_id = wooCustomerId;
+    }
+
     const wcOrder = await createOrder(payload);
     db.prepare(`
       UPDATE orders_queue
