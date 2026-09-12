@@ -942,6 +942,7 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 // Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
 const OVERLAYS_TOP_FIRST = [
   'settingsOverlay',
+  'maintenanceOverlay',
   'refundOverlay',
   'discountOverlay',
   'customOverlay',
@@ -1241,6 +1242,80 @@ document.getElementById('btnCreateCustom').addEventListener('click', () => {
   showToast(`Agregado: ${name}`);
 });
 
+// ---------- Mantenimiento: respaldo y limpieza ----------
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 KB';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function renderMaintenancePanel() {
+  const body = document.getElementById('maintenanceBody');
+  body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando...</div>';
+
+  const { cache, backups, backupDir } = await window.pos.getMaintenanceStats();
+
+  body.innerHTML = `
+    <div class="cash-section-title">Contenido local</div>
+    <div class="cash-line"><span class="muted">Productos</span><span>${cache.products}</span></div>
+    <div class="cash-line"><span class="muted">Variaciones</span><span>${cache.variations}</span></div>
+    <div class="cash-line"><span class="muted">Clientes</span><span>${cache.customers}</span></div>
+    <div class="cash-line"><span class="muted">Ventas guardadas</span><span>${cache.orders}</span></div>
+    <div class="cash-line"><span class="muted">Imágenes</span><span>${cache.imagesCount} · ${formatBytes(cache.imagesBytes)}</span></div>
+    <div class="cash-line total"><span>Base de datos</span><span>${formatBytes(cache.dbBytes)}</span></div>
+
+    <div class="cash-section-title">Respaldo</div>
+    <button class="cash-action-btn" id="btnBackupNow">Respaldar ahora</button>
+    <button class="cash-action-btn secondary" id="btnOpenBackups">Abrir carpeta de respaldos</button>
+    <div class="backup-row" style="margin-top:8px;"><span>${backupDir}</span></div>
+    ${backups.length > 0
+      ? backups.map((b) => `<div class="backup-row"><span>${new Date(b.mtime).toLocaleString()}</span><span>${formatBytes(b.size)}</span></div>`).join('')
+      : '<div class="backup-row"><span>Sin respaldos todavía</span></div>'}
+
+    <div class="cash-section-title">Limpiar caché</div>
+    <div class="subtitle">Borra de esta caja los productos y clientes que ya no existen en
+    la tienda en línea, más las imágenes sueltas. Las ventas NO se tocan.</div>
+    <button class="cash-action-btn secondary" id="btnCleanup">Limpiar caché</button>
+  `;
+
+  document.getElementById('btnBackupNow').onclick = async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = 'Respaldando...';
+    try {
+      const result = await window.pos.backupNow();
+      showToast(`Respaldo creado (${formatBytes(result.size)}).`);
+    } catch (err) {
+      showToast(`No se pudo respaldar: ${err.message}`, true);
+    }
+    renderMaintenancePanel();
+  };
+
+  document.getElementById('btnOpenBackups').onclick = () => window.pos.openBackupsFolder();
+
+  document.getElementById('btnCleanup').onclick = async (e) => {
+    if (!confirm('Se hará un respaldo automático y luego se borrarán de esta caja los productos y clientes que ya no existan en la tienda en línea.\n\n¿Continuar?')) return;
+    e.target.disabled = true;
+    e.target.textContent = 'Limpiando...';
+    try {
+      const r = await window.pos.cleanupCache();
+      showToast(`Limpieza lista: ${r.products} productos, ${r.variations} variaciones, ${r.customers} clientes y ${r.images} imágenes.`);
+      loadProducts(document.getElementById('search').value);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+    renderMaintenancePanel();
+  };
+}
+
+document.getElementById('btnMaintenance').addEventListener('click', () => {
+  document.getElementById('maintenanceOverlay').classList.add('show');
+  renderMaintenancePanel();
+});
+document.getElementById('btnCloseMaintenance').addEventListener('click', () => {
+  document.getElementById('maintenanceOverlay').classList.remove('show');
+});
+
 // ---------- Ajustes ----------
 
 const SETTINGS_FIELDS = {
@@ -1356,7 +1431,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show, #maintenanceOverlay.show'
   );
   if (anyOverlayOpen) return;
 
