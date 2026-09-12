@@ -184,8 +184,34 @@ anteriores, registra un **retiro** en el panel de Caja con el motivo.
 
 Se imprime un comprobante de cancelación con monto devuelto, motivo y espacio de firma.
 
-**No cubre**: cancelaciones parciales (devolver solo algunos artículos de un ticket).
-Es todo o nada.
+### Devoluciones parciales
+
+Botón **Devolver** en el panel de Ventas: abre el detalle del ticket con un contador por
+línea para elegir cuántas piezas se devuelven. El tope por línea es lo que queda
+disponible (si ya devolviste 2 de 3, solo te deja 1 más).
+
+Si la devolución cubre todo lo que queda del ticket, se convierte automáticamente en
+cancelación total — cancelar es más limpio que devolver el 100%.
+
+**En WooCommerce es un mecanismo distinto al de la cancelación**: una devolución parcial
+no cambia el estado de la orden, crea un *refund* sobre ella (`POST /orders/{id}/refunds`).
+Por eso tiene su propia cola (`refunds_queue`) y su propio ciclo de sincronización.
+
+**Reposición de inventario**: los ids de línea los asigna Woo, así que al sincronizar se
+lee la orden de allá y se emparejan las líneas por `product_id`/`variation_id` para pedir
+el restock de las piezas correctas. Si el emparejamiento falla — o la línea era un
+producto temporal, que en Woo es un `fee_line` sin producto asociado — se manda la
+devolución solo por monto: **el dinero queda correcto, pero Woo no repone inventario de
+esa línea**.
+
+El corte descuenta las devoluciones parciales del efectivo esperado y las muestra como
+renglón propio en el panel de Caja.
+
+**Restricción**: igual que la cancelación total, solo se devuelven ventas del turno
+abierto.
+
+**No cubre**: devolver un monto libre que no corresponda a líneas del ticket (para eso,
+registra un retiro en Caja).
 
 ## Ajuste global de precios (%)
 
