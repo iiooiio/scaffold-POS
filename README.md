@@ -211,6 +211,28 @@ El cambio de porcentaje aplica al guardar (recarga el catálogo), sin reiniciar.
 impuestos de WooCommerce. Si manejas precios con IVA incluido, verifica con una venta
 real que el total de la orden en Woo coincida con el ticket impreso.
 
+## Productos y servicios temporales
+
+Botón **+ Producto temporal** en el panel del carrito: descripción, precio unitario y
+cantidad. Sirve para cobrar algo que no está en el catálogo (un servicio, un flete, una
+pieza suelta) sin crear el producto en WooCommerce.
+
+No toca el catálogo ni la base local: vive solo en el carrito de esa venta. En el ticket
+sale como cualquier otra línea; en el carrito aparece marcado como "temporal".
+
+**Cómo llega a WooCommerce**: como `fee_lines`, no como `line_items`. Woo exige
+`product_id` en los line_items, así que un producto inexistente no puede ir ahí. Los
+`fee_lines` aceptan nombre y monto libres, y funcionan offline igual porque no dependen
+de que exista nada en Woo. Si la cantidad es mayor a 1, el nombre incluye `(xN)` porque
+los fee_lines no tienen campo de cantidad.
+
+Se envían con `tax_status: 'none'` a propósito, para que el monto cobrado sea exactamente
+el del ticket. Si necesitas que Woo les calcule impuesto, cámbialo a `'taxable'` en
+`src/sync/order-sync.js`.
+
+**No cubre**: guardar los temporales para reutilizarlos después, ni descontar inventario
+(por definición no tienen existencias).
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
