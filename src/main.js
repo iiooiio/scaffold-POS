@@ -6,9 +6,9 @@ const { autoUpdater } = require('electron-updater');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
-const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint } = require('./sync/order-sync');
+const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
-const { printTicket, printCashReport } = require('./print/printer');
+const { printTicket, printCashReport, printCancellation } = require('./print/printer');
 const cash = require('./cash/cash-session');
 
 let mainWindow;
@@ -101,6 +101,11 @@ app.whenReady().then(async () => {
       }
     } catch (err) {
       console.error('[sync órdenes] fallo:', err.message);
+    }
+    try {
+      await flushPendingCancellations();
+    } catch (err) {
+      console.error('[sync cancelaciones] fallo:', err.message);
     }
   }, config.syncIntervalMs);
 
@@ -210,6 +215,35 @@ ipcMain.handle('queue:retry-order', async (_e, orderId) => retryOrder(orderId));
 ipcMain.handle('queue:resolve-manually', async (_e, { orderId, note }) => resolveManually(orderId, note));
 
 ipcMain.handle('order:recent', () => getRecentOrders());
+
+ipcMain.handle('order:cancel', async (_e, { orderId, reason }) => {
+  // Solo se cancelan ventas del turno ABIERTO. Cancelar una de un turno ya cerrado
+  // cambiaría retroactivamente un corte firmado, y el efectivo devuelto saldría de la
+  // caja de hoy, no de la de ese día. Para esos casos se registra un retiro manual.
+  const session = cash.getOpenSession();
+  if (!session) throw new Error('No hay caja abierta');
+
+  const order = getRecentOrders(200).find((o) => o.id === orderId);
+  if (!order) throw new Error('Venta no encontrada');
+  if (order.cash_session_id !== session.id) {
+    throw new Error('Solo se pueden cancelar ventas del turno actual. Para ventas de turnos anteriores, registra un retiro en el panel de Caja.');
+  }
+
+  const result = cancelOrder(orderId, reason);
+
+  try {
+    await printCancellation({
+      localTicket: result.local_ticket,
+      total: result.total,
+      reason,
+      paymentMethod: result.payment_method,
+    });
+    return { ok: true, needsSync: result.needsSync, printed: true };
+  } catch (err) {
+    // La cancelación ya quedó registrada aunque falle la impresión.
+    return { ok: true, needsSync: result.needsSync, printed: false, printError: err.message };
+  }
+});
 ipcMain.handle('order:reprint', async (_e, orderId) => {
   const data = getOrderForReprint(orderId);
   if (data.cartItems.length === 0) {
