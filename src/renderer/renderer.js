@@ -754,8 +754,6 @@ async function renderSalesPanel() {
 
   for (const o of orders) {
     const isCancelled = CANCELLED_STATUSES.includes(o.status);
-    // Solo se puede cancelar si pertenece al turno abierto (ver main.js).
-    const canCancel = !isCancelled && cashSession && o.cash_session_id === cashSession.id;
 
     const row = document.createElement('div');
     row.className = `sale-row ${isCancelled ? 'cancelled' : ''}`;
@@ -768,7 +766,7 @@ async function renderSalesPanel() {
       </div>
       <span class="sr-total">${money(o.total)}</span>
       <button data-action="reprint">Reimprimir</button>
-      ${canCancel ? '<button data-action="cancel" class="danger">Cancelar</button>' : ''}
+      ${isCancelled ? '' : '<button data-action="cancel" class="danger">Cancelar</button>'}
     `;
 
     row.querySelector('[data-action="reprint"]').onclick = async (e) => {
@@ -826,8 +824,22 @@ const SETTINGS_FIELDS = {
   setSecret: 'WC_CONSUMER_SECRET',
   setRegister: 'REGISTER_ID',
   setPrinter: 'PRINTER_INTERFACE',
+  setPriceAdj: 'PRICE_ADJUSTMENT_PERCENT',
   setLogo: 'LOGO_URL',
 };
+
+// Aviso permanente en el riel cuando los precios NO son los de WooCommerce: si está
+// activo y nadie lo recuerda, se cobra distinto sin que nadie sepa por qué.
+async function refreshPriceAdjustmentNotice() {
+  const pct = await window.pos.getPriceAdjustment();
+  const notice = document.getElementById('priceAdjNotice');
+  if (pct) {
+    document.getElementById('priceAdjValue').textContent = `${pct > 0 ? '+' : ''}${pct}%`;
+    notice.style.display = 'flex';
+  } else {
+    notice.style.display = 'none';
+  }
+}
 
 async function openSettings() {
   const { values, path } = await window.pos.getConfig();
@@ -858,6 +870,9 @@ document.getElementById('btnSaveSettings').addEventListener('click', async () =>
     // el reinicio no es opcional para que todo tome efecto.
     showToast('Guardado. Reinicia la app para aplicar todos los cambios.');
     document.getElementById('settingsOverlay').classList.remove('show');
+    // El ajuste de precios sí aplica sin reiniciar: se recalcula al recargar catálogo.
+    refreshPriceAdjustmentNotice();
+    loadProducts(document.getElementById('search').value);
   } catch (err) {
     showToast(`No se pudo guardar: ${err.message}`, true);
   }
@@ -978,6 +993,7 @@ document.addEventListener('keydown', (e) => {
 
   updateConnDot();
   updateCustomerButton();
+  refreshPriceAdjustmentNotice();
   loadProducts();
   renderCart();
   refreshErrorBadge();
