@@ -108,8 +108,17 @@ externo fijo, etc.) — pendiente de decidir según cómo lo vayas a distribuir.
 
 ## Qué NO cubre (pendiente, a propósito)
 
-- **Productos variables/variaciones** — el schema y el sync solo traen productos simples.
-  Si usas variaciones, hay que extender `products` o agregar tabla `product_variations`.
+- **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
+  sync de variaciones (con sus propias imágenes), y un selector modal en la UI que se
+  abre al tocar un producto tipo `variable` en el catálogo. Los line items de la orden
+  incluyen `variation_id` cuando aplica.
+  **Caveat sin verificar**: el sync de variaciones se dispara solo para productos
+  variables que WooCommerce reporta como "modificados" en el pull incremental
+  (`modified_after`) del producto PADRE. No confirmé si WooCommerce actualiza la fecha
+  de modificación del padre cuando solo cambia una variación (precio/stock) sin tocar el
+  producto en sí. Si notas que el stock/precio de una variación no se actualiza solo,
+  usa "Sincronizar catálogo ahora" — ahí sí vuelve a traer todo. Si el problema persiste,
+  hay que forzar el resync completo de variables en cada pasada (más lento, pero seguro).
 - **Buffer de stock entre cajas** — si dos cajas venden el mismo SKU offline al mismo
   tiempo, pueden sobrevender. No hay lógica de reserva/buffer todavía; es una decisión
   de negocio pendiente (ver conversación previa).
@@ -119,7 +128,13 @@ externo fijo, etc.) — pendiente de decidir según cómo lo vayas a distribuir.
   cuando el cajero ya las resolvió por fuera — ej. las capturó a mano en wp-admin). El
   auto-sync de fondo YA NO reintenta órdenes en error solo; eso es a propósito, según la
   política de stock acordada (sin buffer, sobreventa se resuelve manual).
-- **Clientes** — no hay tabla ni sync de customers todavía.
+- **Clientes** — ✅ resuelto: tabla `customers`, sync completo (sin incremental, Woo no
+  lo soporta en este endpoint) en un intervalo aparte y más espaciado
+  (`CUSTOMERS_SYNC_INTERVAL_MS`, default 10 min), y selector con búsqueda en el carrito.
+  La orden manda `customer_id` a Woo cuando hay cliente seleccionado.
+  **No cubre**: crear clientes nuevos desde el POS (solo asocia existentes), ni borrar
+  clientes que se eliminaron en Woo (quedan en la caché local hasta que alguien limpie
+  la base a mano).
 - **Multi-pago / cambio** — el checkout asume pago simple en efectivo, sin cálculo de
   cambio ni pagos mixtos.
 - **Reintentos con backoff** — `flushPendingOrders` reintenta en cada tick del intervalo,
