@@ -57,6 +57,9 @@ function reload() {
   config.printerInterface = get('PRINTER_INTERFACE', 'printer:auto');
   // Ajuste global de precios en %, aplicado sobre el precio que viene de WooCommerce.
   // Positivo = recargo (ej. 10 sube todo 10%), negativo = descuento (ej. -5 baja 5%).
+  // Dominio de los correos que se generan para clientes creados en el POS. WooCommerce
+  // exige email único por cliente, pero en mostrador nadie lo pide.
+  config.posEmailDomain = get('POS_EMAIL_DOMAIN', 'pos.com');
   config.priceAdjustmentPercent = parseFloat(get('PRICE_ADJUSTMENT_PERCENT', '0')) || 0;
   config.syncIntervalMs = parseInt(get('SYNC_INTERVAL_MS', '30000'), 10);
   config.customersSyncIntervalMs = parseInt(get('CUSTOMERS_SYNC_INTERVAL_MS', '600000'), 10);
