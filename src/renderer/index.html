@@ -809,6 +809,59 @@
     cursor: pointer;
     font-size: 13px;
   }
+  #btnSettings {
+    background: transparent;
+    border: 1px solid #3A423E;
+    color: var(--rail-text);
+    padding: 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #btnSettings:hover { background: #2A302C; }
+
+  #settingsOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+  }
+  #settingsOverlay.show { display: flex; }
+  #settingsPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 480px;
+    max-height: 88vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 22px;
+  }
+  #settingsPanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #settingsPanel .subtitle { font-size: 12px; color: var(--ink-soft); margin-bottom: 12px; }
+  .set-label { font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
+  #settingsPanel input {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+  #settingsPanel input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #settingsPath { word-break: break-all; margin-top: 10px; margin-bottom: 0; }
+  #btnCloseSettings {
+    margin-top: 10px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -835,6 +888,7 @@
       <button id="btnSales">Ventas</button>
       <button id="btnCash">Caja</button>
       <button id="btnErrors">⚠ <span id="errorCount">0</span> con error</button>
+      <button id="btnSettings">Ajustes</button>
       <button id="btnSyncCatalog">Sincronizar catálogo</button>
     </div>
 
@@ -930,6 +984,35 @@
       <h2>Ventas recientes</h2>
       <div id="salesBody"></div>
       <button id="btnCloseSales">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="settingsOverlay">
+    <div id="settingsPanel">
+      <h2>Ajustes de esta caja</h2>
+      <div class="subtitle" id="settingsHint">Se guardan en esta computadora, no en el repositorio.</div>
+
+      <label class="set-label">URL del sitio WooCommerce</label>
+      <input id="setBaseUrl" type="text" placeholder="https://tu-sitio.com" />
+
+      <label class="set-label">Consumer key</label>
+      <input id="setKey" type="text" placeholder="ck_..." />
+
+      <label class="set-label">Consumer secret</label>
+      <input id="setSecret" type="password" placeholder="cs_..." />
+
+      <label class="set-label">Identificador de esta caja</label>
+      <input id="setRegister" type="text" placeholder="CAJA1" />
+
+      <label class="set-label">Impresora (interface)</label>
+      <input id="setPrinter" type="text" placeholder="printer:auto" />
+
+      <label class="set-label">URL del logo (opcional)</label>
+      <input id="setLogo" type="text" placeholder="https://tu-sitio.com/wp-content/..." />
+
+      <button class="cash-action-btn" id="btnSaveSettings">Guardar</button>
+      <div class="subtitle" id="settingsPath"></div>
+      <button id="btnCloseSettings">Cerrar</button>
     </div>
   </div>
 
