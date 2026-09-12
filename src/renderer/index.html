@@ -654,6 +654,98 @@
     cursor: pointer;
     font-size: 13px;
   }
+  #btnCash {
+    background: transparent;
+    border: 1px solid #3A423E;
+    color: var(--rail-text);
+    padding: 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #btnCash:hover { background: #2A302C; }
+  #btnCash.closed { border-color: var(--warn); color: #E9A882; }
+
+  #cashOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 11;
+  }
+  #cashOverlay.show { display: flex; }
+  #cashPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 460px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #cashPanel h2 { font-size: 16px; margin: 0 0 14px; }
+  #cashBody { overflow-y: auto; }
+  .cash-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 5px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .cash-line.total {
+    border-top: 1px solid var(--border);
+    margin-top: 6px;
+    padding-top: 10px;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .cash-line .muted { color: var(--ink-soft); }
+  .cash-section-title {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin: 16px 0 6px;
+  }
+  #cashPanel input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  #cashPanel .cash-action-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: var(--radius);
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  #cashPanel .cash-action-btn.secondary {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+  #cashPanel .cash-action-btn.danger { background: var(--warn); }
+  .cash-row-2 { display: flex; gap: 8px; }
+  .diff-ok { color: var(--accent); font-weight: 700; }
+  .diff-bad { color: var(--warn); font-weight: 700; }
+  #btnCloseCash {
+    margin-top: 14px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -677,6 +769,7 @@
         <span class="rail-value" id="catalogSyncedAt">sin sincronizar</span>
       </div>
 
+      <button id="btnCash">Caja</button>
       <button id="btnErrors">⚠ <span id="errorCount">0</span> con error</button>
       <button id="btnSyncCatalog">Sincronizar catálogo</button>
     </div>
@@ -757,6 +850,14 @@
       <input id="customerSearch" placeholder="Nombre, correo o teléfono..." />
       <div id="customerListBody"></div>
       <button id="btnCloseCustomers">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="cashOverlay">
+    <div id="cashPanel">
+      <h2>Control de efectivo</h2>
+      <div id="cashBody"></div>
+      <button id="btnCloseCash">Cerrar</button>
     </div>
   </div>
 
