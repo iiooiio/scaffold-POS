@@ -51,14 +51,26 @@ function getSessionSummary(sessionId) {
   const session = db.prepare(`SELECT * FROM cash_sessions WHERE id = ?`).get(sessionId);
   if (!session) throw new Error(`Sesión ${sessionId} no encontrada`);
 
+  // Las canceladas NO cuentan: el dinero se le devolvió al cliente, así que no está
+  // en el cajón. Se excluyen en cualquier etapa de la cancelación (local o ya en Woo).
+  const notCancelled = `status NOT IN ('cancelled_local', 'cancel_pending', 'cancelled')`;
+
   const cashSales = db.prepare(`
     SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
-    FROM orders_queue WHERE cash_session_id = ? AND payment_method = 'cash'
+    FROM orders_queue
+    WHERE cash_session_id = ? AND payment_method = 'cash' AND ${notCancelled}
   `).get(sessionId);
 
   const cardSales = db.prepare(`
     SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
-    FROM orders_queue WHERE cash_session_id = ? AND payment_method = 'card'
+    FROM orders_queue
+    WHERE cash_session_id = ? AND payment_method = 'card' AND ${notCancelled}
+  `).get(sessionId);
+
+  const cancelled = db.prepare(`
+    SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
+    FROM orders_queue
+    WHERE cash_session_id = ? AND status IN ('cancelled_local', 'cancel_pending', 'cancelled')
   `).get(sessionId);
 
   const movements = db.prepare(`
@@ -77,6 +89,8 @@ function getSessionSummary(sessionId) {
     cashSalesCount: cashSales.count,
     cardSalesTotal: cardSales.total,
     cardSalesCount: cardSales.count,
+    cancelledTotal: cancelled.total,
+    cancelledCount: cancelled.count,
     cashIn,
     cashOut,
     expected,
