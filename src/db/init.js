@@ -42,7 +42,13 @@ function getDb() {
       total REAL,
       payment_method TEXT,             -- cash | card (para el corte de caja)
       cash_session_id INTEGER,         -- sesión de caja a la que pertenece la venta
-      status TEXT NOT NULL DEFAULT 'pending', -- pending | synced | error | resolved_manually
+      cancelled_at TEXT,
+      cancel_reason TEXT,
+      -- pending | synced | error | resolved_manually
+      -- cancelled_local  : cancelada sin haber llegado nunca a WooCommerce
+      -- cancel_pending   : ya estaba en Woo; falta empujar la cancelación
+      -- cancelled        : cancelación confirmada en WooCommerce
+      status TEXT NOT NULL DEFAULT 'pending',
       wc_order_id INTEGER,
       error_message TEXT,
       created_at TEXT NOT NULL,
@@ -116,6 +122,12 @@ function getDb() {
   }
   if (!existingCols.includes('cash_session_id')) {
     db.exec(`ALTER TABLE orders_queue ADD COLUMN cash_session_id INTEGER`);
+  }
+  if (!existingCols.includes('cancelled_at')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN cancelled_at TEXT`);
+  }
+  if (!existingCols.includes('cancel_reason')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN cancel_reason TEXT`);
   }
 
   const productCols = db.prepare(`PRAGMA table_info(products)`).all().map((c) => c.name);
