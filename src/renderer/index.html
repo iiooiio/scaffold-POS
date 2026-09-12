@@ -746,6 +746,69 @@
     cursor: pointer;
     font-size: 13px;
   }
+  #btnSales {
+    background: transparent;
+    border: 1px solid #3A423E;
+    color: var(--rail-text);
+    padding: 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #btnSales:hover { background: #2A302C; }
+
+  #salesOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 11;
+  }
+  #salesOverlay.show { display: flex; }
+  #salesPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 460px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #salesPanel h2 { font-size: 16px; margin: 0 0 14px; }
+  #salesBody { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .sale-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    font-size: 13px;
+  }
+  .sale-row .sr-info { flex: 1; }
+  .sale-row .sr-ticket { font-weight: 600; }
+  .sale-row .sr-meta { font-size: 11px; color: var(--ink-soft); }
+  .sale-row .sr-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .sale-row button {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+  }
+  #btnCloseSales {
+    margin-top: 14px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -769,6 +832,7 @@
         <span class="rail-value" id="catalogSyncedAt">sin sincronizar</span>
       </div>
 
+      <button id="btnSales">Ventas</button>
       <button id="btnCash">Caja</button>
       <button id="btnErrors">⚠ <span id="errorCount">0</span> con error</button>
       <button id="btnSyncCatalog">Sincronizar catálogo</button>
@@ -858,6 +922,14 @@
       <h2>Control de efectivo</h2>
       <div id="cashBody"></div>
       <button id="btnCloseCash">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="salesOverlay">
+    <div id="salesPanel">
+      <h2>Ventas recientes</h2>
+      <div id="salesBody"></div>
+      <button id="btnCloseSales">Cerrar</button>
     </div>
   </div>
 
