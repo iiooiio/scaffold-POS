@@ -218,4 +218,56 @@ function getLocalVariations(parentId) {
   return rows.map((r) => ({ ...r, attributes: JSON.parse(r.attributes_json || '[]') }));
 }
 
-module.exports = { syncCatalog, getLocalProducts, getLocalVariations };
+// Busca por SKU EXACTO (no LIKE): es lo que manda un lector de código de barras.
+// Revisa variaciones primero porque en productos variables el SKU escaneable suele
+// estar en la variación, no en el padre.
+function findBySku(sku) {
+  const db = getDb();
+  const clean = (sku || '').trim();
+  if (!clean) return null;
+
+  const variation = db.prepare(`
+    SELECT v.*, p.name AS parent_name, p.id AS parent_id_ref
+    FROM product_variations v
+    JOIN products p ON p.id = v.parent_id
+    WHERE v.sku = ?
+  `).get(clean);
+
+  if (variation) {
+    const attributes = JSON.parse(variation.attributes_json || '[]');
+    const label = attributes.map((a) => a.option).filter(Boolean).join(', ');
+    return {
+      kind: 'variation',
+      product_id: variation.parent_id,
+      variation_id: variation.id,
+      name: label ? `${variation.parent_name} — ${label}` : variation.parent_name,
+      price: variation.price,
+      manage_stock: variation.manage_stock,
+      stock_quantity: variation.stock_quantity,
+    };
+  }
+
+  const product = db.prepare(`
+    SELECT * FROM products WHERE sku = ? AND status = 'publish'
+  `).get(clean);
+
+  if (product) {
+    // Un producto variable no se puede vender directo: hay que elegir variación.
+    if (product.type === 'variable') {
+      return { kind: 'needs-variation', product_id: product.id, name: product.name };
+    }
+    return {
+      kind: 'product',
+      product_id: product.id,
+      variation_id: null,
+      name: product.name,
+      price: product.price,
+      manage_stock: product.manage_stock,
+      stock_quantity: product.stock_quantity,
+    };
+  }
+
+  return null;
+}
+
+module.exports = { syncCatalog, getLocalProducts, getLocalVariations, findBySku };
