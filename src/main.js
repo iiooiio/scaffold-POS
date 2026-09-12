@@ -7,7 +7,7 @@ const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations } = require('./sync/order-sync');
-const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
+const { syncCustomers, getLocalCustomers, createLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
 const { printTicket, printCashReport, printCancellation } = require('./print/printer');
 const cash = require('./cash/cash-session');
 
@@ -104,6 +104,13 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.error('[sync catálogo] fallo (probablemente sin conexión):', err.message);
     }
+    // Los clientes creados sin conexión van PRIMERO: una orden que referencia un
+    // cliente aún inexistente en Woo falla al enviarse.
+    try {
+      await flushPendingCustomers();
+    } catch (err) {
+      console.error('[sync clientes pendientes] fallo:', err.message);
+    }
     try {
       const result = await flushPendingOrders();
       if (result.attempted > 0) {
@@ -183,6 +190,7 @@ ipcMain.handle('catalog:get-variations', async (_e, productId) =>
   })));
 ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers({ search }));
 ipcMain.handle('customers:sync-now', async () => syncCustomers());
+ipcMain.handle('customers:create', async (_e, data) => createLocalCustomer(data));
 
 ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId }) => {
   // El corte de caja solo sirve si TODA venta queda ligada a un turno. Sin sesión
