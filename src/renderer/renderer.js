@@ -755,6 +755,137 @@ document.getElementById('btnCloseSales').addEventListener('click', () => {
   document.getElementById('salesOverlay').classList.remove('show');
 });
 
+// ---------- Ajustes ----------
+
+const SETTINGS_FIELDS = {
+  setBaseUrl: 'WC_BASE_URL',
+  setKey: 'WC_CONSUMER_KEY',
+  setSecret: 'WC_CONSUMER_SECRET',
+  setRegister: 'REGISTER_ID',
+  setPrinter: 'PRINTER_INTERFACE',
+  setLogo: 'LOGO_URL',
+};
+
+async function openSettings() {
+  const { values, path } = await window.pos.getConfig();
+  for (const [inputId, key] of Object.entries(SETTINGS_FIELDS)) {
+    document.getElementById(inputId).value = values[key] || '';
+  }
+  document.getElementById('settingsPath').textContent = `Archivo: ${path}`;
+  document.getElementById('settingsOverlay').classList.add('show');
+}
+
+document.getElementById('btnSettings').addEventListener('click', openSettings);
+document.getElementById('btnCloseSettings').addEventListener('click', () => {
+  document.getElementById('settingsOverlay').classList.remove('show');
+});
+
+document.getElementById('btnSaveSettings').addEventListener('click', async () => {
+  const values = {};
+  for (const [inputId, key] of Object.entries(SETTINGS_FIELDS)) {
+    values[key] = document.getElementById(inputId).value.trim();
+  }
+  try {
+    const result = await window.pos.saveConfig(values);
+    if (!result.isConfigured) {
+      showToast('Guardado, pero faltan URL, key o secret para conectar.', true);
+      return;
+    }
+    // Varios valores (intervalos de sync, impresora) se leen al arrancar, así que
+    // el reinicio no es opcional para que todo tome efecto.
+    showToast('Guardado. Reinicia la app para aplicar todos los cambios.');
+    document.getElementById('settingsOverlay').classList.remove('show');
+  } catch (err) {
+    showToast(`No se pudo guardar: ${err.message}`, true);
+  }
+});
+
+// ---------- Lector de código de barras ----------
+// Un lector USB se comporta como teclado: teclea muy rápido y manda Enter. Se detecta
+// por velocidad (teclas a menos de 40ms una de otra), no por foco, para que funcione
+// aunque el cajero no haya hecho click en el buscador.
+
+let scanBuffer = '';
+let lastKeyTime = 0;
+const SCAN_MAX_GAP_MS = 40;
+
+async function handleScan(code) {
+  const match = await window.pos.findBySku(code);
+
+  if (!match) {
+    showToast(`Código no encontrado: ${code}`, true);
+    return;
+  }
+
+  if (match.kind === 'needs-variation') {
+    // Es un producto variable: el SKU del padre no se puede vender directo.
+    const parent = allProducts.find((p) => p.id === match.product_id);
+    if (parent) {
+      openVariationPicker(parent);
+    } else {
+      showToast(`${match.name}: elige la variación en el catálogo.`, true);
+    }
+    return;
+  }
+
+  const existing = cart.find(
+    (i) => i.product_id === match.product_id && i.variation_id == match.variation_id
+  );
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    cart.push({
+      product_id: match.product_id,
+      variation_id: match.variation_id,
+      name: match.name,
+      price: match.price || 0,
+      quantity: 1,
+      manage_stock: match.manage_stock,
+      stock_quantity: match.stock_quantity,
+    });
+  }
+  renderCart();
+  showToast(`Agregado: ${match.name}`);
+}
+
+document.addEventListener('keydown', (e) => {
+  // No interferir con modales abiertos ni con escritura manual en campos de texto
+  // libre (nota, motivo de movimiento, ajustes).
+  const anyOverlayOpen = document.querySelector(
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show'
+  );
+  if (anyOverlayOpen) return;
+
+  const tag = document.activeElement?.tagName;
+  if (tag === 'TEXTAREA') return;
+
+  const now = Date.now();
+
+  if (e.key === 'Enter') {
+    if (scanBuffer.length >= 3) {
+      e.preventDefault();
+      const code = scanBuffer;
+      scanBuffer = '';
+      // Si el lector escribió dentro del buscador, limpiarlo: ya se procesó como escaneo.
+      const search = document.getElementById('search');
+      if (document.activeElement === search) {
+        search.value = '';
+        loadProducts();
+      }
+      handleScan(code);
+    }
+    scanBuffer = '';
+    return;
+  }
+
+  if (e.key.length !== 1) return; // ignora Shift, flechas, etc.
+
+  // Pausa larga = tecleo humano, no escaneo: se reinicia el buffer.
+  if (now - lastKeyTime > SCAN_MAX_GAP_MS) scanBuffer = '';
+  scanBuffer += e.key;
+  lastKeyTime = now;
+});
+
 // ---------- Arranque ----------
 
 (async function init() {
@@ -786,6 +917,15 @@ document.getElementById('btnCloseSales').addEventListener('click', () => {
   loadProducts();
   renderCart();
   refreshErrorBadge();
+
+  // Si falta la configuración de WooCommerce, eso va primero: sin ella no hay catálogo
+  // ni sincronización, y abrir caja no sirve de nada.
+  const { isConfigured } = await window.pos.getConfig();
+  if (!isConfigured) {
+    showToast('Falta configurar la conexión con WooCommerce.', true);
+    openSettings();
+    return;
+  }
 
   // Si no hay turno abierto, el panel de caja se abre solo: abrir caja es lo primero
   // del día, no algo que el cajero deba ir a buscar en el riel.
