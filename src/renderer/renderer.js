@@ -232,29 +232,43 @@ function renderCart() {
   const empty = document.getElementById('cartEmpty');
   container.innerHTML = '';
 
+  const computed = computeCart();
+
   if (cart.length === 0) {
     container.appendChild(empty);
   } else {
-    for (const item of cart) {
+    computed.lines.forEach((l, index) => {
+      const item = l.item;
+      const discounted = l.finalTotal < l.listSubtotal;
+
       const line = document.createElement('div');
       const fresh = isJustAdded(item.product_id, item.variation_id);
       line.className = `cart-line ${fresh ? 'just-added' : ''} ${item.custom ? 'custom' : ''}`;
       line.innerHTML = `
         <span class="cl-name">${item.name}</span>
+        <button class="cl-discount ${item.discount ? 'active' : ''}" data-action="discount" title="Descuento de línea">%</button>
         <span class="cl-qty">
           <button data-action="dec">−</button>
           <span>${item.quantity}</span>
           <button data-action="inc">+</button>
         </span>
-        <span class="cl-subtotal">${money(item.price * item.quantity)}</span>
+        <span class="cl-subtotal">
+          ${discounted ? `<span class="cl-was">${money(l.listSubtotal)}</span>` : ''}${money(l.finalTotal)}
+        </span>
         <button class="cl-remove" data-action="remove">×</button>
       `;
       line.querySelector('[data-action="dec"]').onclick = () => changeQty(item.product_id, item.variation_id, -1);
       line.querySelector('[data-action="inc"]').onclick = () => changeQty(item.product_id, item.variation_id, 1);
       line.querySelector('[data-action="remove"]').onclick = () => removeFromCart(item.product_id, item.variation_id);
+      line.querySelector('[data-action="discount"]').onclick = () => openDiscountModal(index);
       container.appendChild(line);
-    }
+    });
   }
+
+  const summary = document.getElementById('discountSummary');
+  summary.classList.toggle('show', computed.totalDiscount > 0);
+  document.getElementById('discountSummaryAmount').textContent = `−${money(computed.totalDiscount)}`;
+  document.getElementById('btnTicketDiscount').classList.toggle('active', Boolean(ticketDiscount));
 
   const totalEl = document.getElementById('totalAmount');
   totalEl.textContent = money(getTotal());
@@ -269,6 +283,143 @@ function renderCart() {
   renderProductGrid(); // mantiene el badge de cantidad del grid sincronizado
 }
 
+// ---------- Descuentos ----------
+//
+// Un solo cálculo para todo: lo que ve el cajero, lo que se imprime y lo que se manda a
+// WooCommerce salen de computeCart(). Si hubiera dos fórmulas, tarde o temprano el
+// ticket y la orden dirían cosas distintas.
+//
+// Orden de aplicación: primero el descuento de línea, después el del ticket sobre lo que
+// queda, repartido proporcionalmente entre las líneas.
+
+let ticketDiscount = null;   // { type: 'percent'|'amount', value }
+let discountTarget = null;   // null = ticket completo; si no, índice de la línea
+let discountType = 'percent';
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function applyDiscount(base, discount) {
+  if (!discount || !(discount.value > 0)) return 0;
+  const raw = discount.type === 'percent' ? base * discount.value / 100 : discount.value;
+  return round2(Math.min(Math.max(raw, 0), base)); // nunca negativo ni mayor a la base
+}
+
+function computeCart() {
+  const lines = cart.map((item) => {
+    const listSubtotal = round2(item.price * item.quantity);
+    const lineDiscount = applyDiscount(listSubtotal, item.discount);
+    return { item, listSubtotal, lineDiscount, afterLine: round2(listSubtotal - lineDiscount) };
+  });
+
+  const afterLineTotal = round2(lines.reduce((sum, l) => sum + l.afterLine, 0));
+  const ticketDiscountAmount = applyDiscount(afterLineTotal, ticketDiscount);
+
+  // Reparto proporcional del descuento de ticket. La última línea absorbe el redondeo
+  // para que la suma de las líneas cuadre EXACTO con el total cobrado.
+  let repartido = 0;
+  lines.forEach((l, i) => {
+    let share;
+    if (i === lines.length - 1) {
+      share = round2(ticketDiscountAmount - repartido);
+    } else {
+      share = afterLineTotal > 0
+        ? round2(ticketDiscountAmount * (l.afterLine / afterLineTotal))
+        : 0;
+      repartido = round2(repartido + share);
+    }
+    l.ticketShare = share;
+    l.finalTotal = round2(l.afterLine - share);
+    l.effectiveUnitPrice = l.item.quantity > 0 ? round2(l.finalTotal / l.item.quantity) : 0;
+  });
+
+  const total = round2(lines.reduce((sum, l) => sum + l.finalTotal, 0));
+  const listTotal = round2(lines.reduce((sum, l) => sum + l.listSubtotal, 0));
+
+  return { lines, total, listTotal, totalDiscount: round2(listTotal - total), ticketDiscountAmount };
+}
+
+function openDiscountModal(targetIndex = null) {
+  discountTarget = targetIndex;
+  const isTicket = targetIndex === null;
+  const current = isTicket ? ticketDiscount : cart[targetIndex]?.discount;
+
+  document.getElementById('discountTitle').textContent = isTicket ? 'Descuento del ticket' : 'Descuento de línea';
+  document.getElementById('discountSubtitle').textContent = isTicket
+    ? 'Se reparte proporcionalmente entre las líneas.'
+    : cart[targetIndex]?.name || '';
+
+  discountType = current?.type || 'percent';
+  document.querySelectorAll('.disc-type').forEach((b) => {
+    b.classList.toggle('active', b.dataset.type === discountType);
+  });
+  document.getElementById('discountValue').value = current?.value ?? '';
+
+  document.getElementById('discountOverlay').classList.add('show');
+  updateDiscountPreview();
+  document.getElementById('discountValue').focus();
+}
+
+function discountBase() {
+  if (discountTarget === null) {
+    const { lines } = computeCart();
+    return round2(lines.reduce((sum, l) => sum + l.afterLine, 0));
+  }
+  const item = cart[discountTarget];
+  return item ? round2(item.price * item.quantity) : 0;
+}
+
+function updateDiscountPreview() {
+  const value = parseFloat(document.getElementById('discountValue').value) || 0;
+  const base = discountBase();
+  const off = applyDiscount(base, { type: discountType, value });
+  document.getElementById('discountPreview').textContent = money(base - off);
+}
+
+document.querySelectorAll('.disc-type').forEach((btn) => {
+  btn.onclick = () => {
+    discountType = btn.dataset.type;
+    document.querySelectorAll('.disc-type').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateDiscountPreview();
+  };
+});
+
+document.getElementById('discountValue').addEventListener('input', updateDiscountPreview);
+
+document.getElementById('btnApplyDiscount').addEventListener('click', () => {
+  const value = parseFloat(document.getElementById('discountValue').value);
+  if (!(value > 0)) {
+    showToast('Captura un descuento mayor a cero.', true);
+    return;
+  }
+  const discount = { type: discountType, value };
+  if (discountTarget === null) {
+    ticketDiscount = discount;
+  } else if (cart[discountTarget]) {
+    cart[discountTarget].discount = discount;
+  }
+  document.getElementById('discountOverlay').classList.remove('show');
+  renderCart();
+});
+
+document.getElementById('btnRemoveDiscount').addEventListener('click', () => {
+  if (discountTarget === null) {
+    ticketDiscount = null;
+  } else if (cart[discountTarget]) {
+    delete cart[discountTarget].discount;
+  }
+  document.getElementById('discountOverlay').classList.remove('show');
+  renderCart();
+});
+
+document.getElementById('btnCloseDiscount').addEventListener('click', () => {
+  document.getElementById('discountOverlay').classList.remove('show');
+});
+
+document.getElementById('btnTicketDiscount').addEventListener('click', () => openDiscountModal(null));
+
 // ---------- Pago y checkout ----------
 
 document.querySelectorAll('.pay-btn').forEach((btn) => {
@@ -282,7 +433,7 @@ document.querySelectorAll('.pay-btn').forEach((btn) => {
 });
 
 function getTotal() {
-  return cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  return computeCart().total;
 }
 
 // Calcula el cambio en vivo y bloquea "Cobrar" si el efectivo recibido no alcanza.
@@ -355,8 +506,21 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   const noteChecked = document.getElementById('noteCheckbox').checked;
   const note = noteChecked ? document.getElementById('noteText').value.trim() : '';
 
+  // Se manda el precio EFECTIVO por unidad (ya con descuentos aplicados) junto al de
+  // lista, para que el ticket y la orden en Woo salgan del mismo cálculo que vio el
+  // cajero -- ver computeCart().
+  const computed = computeCart();
+  const itemsToCharge = computed.lines.map((l) => ({
+    ...l.item,
+    price: l.effectiveUnitPrice,
+    list_price: l.item.price,
+    line_total: l.finalTotal,
+    line_subtotal: l.listSubtotal,
+    discount_amount: round2(l.listSubtotal - l.finalTotal),
+  }));
+
   try {
-    const result = await window.pos.checkout(cart, paymentMethod, { received, change }, note, selectedCustomer?.id);
+    const result = await window.pos.checkout(itemsToCharge, paymentMethod, { received, change }, note, selectedCustomer?.id);
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -365,6 +529,7 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
       !result.printed
     );
     cart = [];
+    ticketDiscount = null;
     document.getElementById('cashReceived').value = '';
     document.getElementById('noteCheckbox').checked = false;
     document.getElementById('noteText').value = '';
@@ -778,6 +943,7 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 const OVERLAYS_TOP_FIRST = [
   'settingsOverlay',
   'refundOverlay',
+  'discountOverlay',
   'customOverlay',
   'cashOverlay',
   'salesOverlay',
@@ -1190,7 +1356,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show'
   );
   if (anyOverlayOpen) return;
 
