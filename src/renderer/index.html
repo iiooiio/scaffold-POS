@@ -847,6 +847,51 @@
   }
   #btnSettings:hover { background: #2A302C; }
 
+  #customOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 11;
+  }
+  #customOverlay.show { display: flex; }
+  #customPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 400px;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #customPanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #customPanel .subtitle { font-size: 12px; color: var(--ink-soft); margin-bottom: 14px; }
+  #customPanel input {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+  #customPanel input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #customPanel .set-label { margin-bottom: 4px; }
+  #btnCloseCustom {
+    margin-top: 10px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .cart-line.custom .cl-name::after {
+    content: ' · temporal';
+    color: var(--ink-soft);
+    font-size: 11px;
+  }
+
   #settingsOverlay {
     position: fixed;
     inset: 0;
@@ -952,7 +997,7 @@
 
     <div id="catalog">
       <div id="priceAdjNotice">
-        Precios con ajuste de <strong id="priceAdjValue"></strong> sobre el catálogo de WooCommerce
+        Precios con ajuste de <strong id="priceAdjValue"></strong> sobre el catálogo de tienda en línea
       </div>
       <div id="searchRow">
         <input id="search" placeholder="Buscar producto o SKU..." />
@@ -967,6 +1012,8 @@
         <button id="btnSelectCustomer">Cliente: Ninguno</button>
         <button id="btnClearCustomer" title="Quitar cliente">×</button>
       </div>
+      <button id="btnAddCustom" class="cash-action-btn secondary" style="margin-bottom:12px;">+ Producto temporal</button>
+
       <div id="cartItems">
         <div id="cartEmpty">Toca un producto para agregarlo</div>
       </div>
@@ -1058,6 +1105,25 @@
       <h2>Ventas recientes</h2>
       <div id="salesBody"></div>
       <button id="btnCloseSales">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="customOverlay">
+    <div id="customPanel">
+      <h2>Producto o servicio temporal</h2>
+      <div class="subtitle">No se agrega al catálogo. Solo se cobra en esta venta.</div>
+
+      <div class="set-label">Descripción</div>
+      <input id="cpName" type="text" placeholder="Ej. Servicio de instalación" />
+
+      <div class="set-label">Precio unitario</div>
+      <input id="cpPrice" type="number" step="0.01" min="0" placeholder="0.00" />
+
+      <div class="set-label">Cantidad</div>
+      <input id="cpQty" type="number" step="1" min="1" value="1" />
+
+      <button id="btnCreateCustom" class="cash-action-btn">Agregar al carrito</button>
+      <button id="btnCloseCustom">Cancelar</button>
     </div>
   </div>
 
