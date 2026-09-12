@@ -16,13 +16,19 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   const metaData = [
     { key: '_pos_register_id', value: config.registerId },
     { key: '_pos_local_ticket', value: localTicket },
-    // Para que la columna Origin/Atribución de WooCommerce no marque estas órdenes
-    // como "Online" -- basado en la documentación de meta keys de Order Attribution
-    // (_wc_order_attribution_*), no verificado contra un sitio real.
-    { key: '_wc_order_attribution_source_type', value: 'utm' },
-    { key: '_wc_order_attribution_utm_source', value: `pos-${config.registerId}` },
-    { key: '_wc_order_attribution_utm_medium', value: 'pos' },
   ];
+
+  // Origen de la orden. Se manda SOLO source_type, sin campos UTM.
+  //
+  // BUG CORREGIDO: antes se mandaba source_type='utm' junto con utm_source/utm_medium.
+  // Con source_type='utm', WooCommerce intenta renderizar también utm_campaign,
+  // device_type y session_page_views en los metaboxes "Order attribution" y "Customer
+  // history" -- y al no existir, truena con error crítico el detalle de la orden y el
+  // historial del cliente. 'mobile_app' es un valor válido del enum que no arrastra
+  // campos acompañantes.
+  if (config.orderAttribution && config.orderAttribution !== 'none') {
+    metaData.push({ key: '_wc_order_attribution_source_type', value: config.orderAttribution });
+  }
   if (paymentMethod === 'cash' && cashInfo) {
     metaData.push({ key: '_pos_cash_received', value: String(cashInfo.received) });
     metaData.push({ key: '_pos_cash_change', value: String(cashInfo.change) });
