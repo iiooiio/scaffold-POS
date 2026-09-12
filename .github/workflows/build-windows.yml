@@ -7,6 +7,11 @@ on:
       - 'v*'
   workflow_dispatch: {}
 
+# Necesario para que electron-builder pueda crear el release de GitHub con el .exe.
+# Sin esto el auto-update no tiene de dónde bajar las actualizaciones.
+permissions:
+  contents: write
+
 jobs:
   build-win:
     runs-on: windows-latest
@@ -26,7 +31,16 @@ jobs:
       - name: Compilar módulo nativo (better-sqlite3) para Electron
         run: npm run rebuild
 
-      - name: Generar instalador Windows (NSIS)
+      # En push de tag: publica el release (necesario para auto-update).
+      # En corrida manual: solo compila, sin publicar.
+      - name: Generar instalador y publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run dist:win-publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generar instalador sin publicar
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         run: npm run dist:win
 
       - name: Subir instalador como artefacto
