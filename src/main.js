@@ -2,9 +2,10 @@ const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { autoUpdater } = require('electron-updater');
 const config = require('./config');
 const { getDb } = require('./db/init');
-const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
+const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
 const { printTicket, printCashReport } = require('./print/printer');
@@ -85,9 +86,9 @@ app.whenReady().then(async () => {
   createWindow();
 
   // Loop de sincronización en background: catálogo + cola de órdenes.
-  // Si no hay conexión, syncCatalog/flushPendingOrders fallan/no hacen nada y ya,
-  // no se cae la app.
+  // Si no hay conexión o falta configuración, no hace nada y no se cae la app.
   setInterval(async () => {
+    if (!config.isConfigured()) return;
     try {
       await syncCatalog();
     } catch (err) {
@@ -104,10 +105,25 @@ app.whenReady().then(async () => {
   }, config.syncIntervalMs);
 
   // Intervalo aparte para clientes, más espaciado -- ver comentario en config.js.
-  syncCustomers().catch((err) => console.error('[sync clientes] fallo en el arranque:', err.message));
-  setInterval(() => {
+  const runCustomerSync = () => {
+    if (!config.isConfigured()) return;
     syncCustomers().catch((err) => console.error('[sync clientes] fallo:', err.message));
-  }, config.customersSyncIntervalMs);
+  };
+  runCustomerSync();
+  setInterval(runCustomerSync, config.customersSyncIntervalMs);
+
+  // Auto-update: solo en la app empaquetada (en desarrollo no aplica). Busca al
+  // arrancar y luego cada 4 horas. Requiere que el build se haya publicado como
+  // release de GitHub -- ver README.
+  if (app.isPackaged) {
+    const checkUpdates = () => {
+      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        console.error('[auto-update] fallo al buscar actualizaciones:', err.message);
+      });
+    };
+    checkUpdates();
+    setInterval(checkUpdates, 4 * 60 * 60 * 1000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -121,6 +137,17 @@ app.on('window-all-closed', () => {
 // ---- IPC: puente entre la UI (renderer) y la lógica de negocio ----
 
 ipcMain.handle('app:register-id', () => config.registerId);
+ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('config:get', () => ({
+  values: config.getEditableConfig(),
+  isConfigured: config.isConfigured(),
+  path: config.configPath(),
+}));
+ipcMain.handle('config:save', (_e, values) => {
+  config.saveConfig(values);
+  return { values: config.getEditableConfig(), isConfigured: config.isConfigured() };
+});
+ipcMain.handle('catalog:find-by-sku', (_e, sku) => findBySku(sku));
 ipcMain.handle('app:logo-url', () => toFileUrl(logoLocalPath));
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) =>
