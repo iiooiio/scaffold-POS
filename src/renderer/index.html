@@ -892,6 +892,69 @@
     font-size: 11px;
   }
 
+  #refundOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+  }
+  #refundOverlay.show { display: flex; }
+  #refundPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 460px;
+    max-height: 82vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #refundPanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #refundPanel .subtitle { font-size: 12px; color: var(--ink-soft); margin-bottom: 14px; }
+  #refundPanel input {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+  .refund-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .refund-line .rl-info { flex: 1; }
+  .refund-line .rl-name { font-weight: 500; }
+  .refund-line .rl-meta { font-size: 11px; color: var(--ink-soft); }
+  .refund-line .rl-qty { display: flex; align-items: center; gap: 6px; }
+  .refund-line .rl-qty button {
+    width: 24px; height: 24px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .refund-line .rl-qty span { min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+  .refund-line.depleted { opacity: 0.45; }
+  #btnCloseRefund {
+    margin-top: 10px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
+
   #settingsOverlay {
     position: fixed;
     inset: 0;
@@ -1124,6 +1187,19 @@
 
       <button id="btnCreateCustom" class="cash-action-btn">Agregar al carrito</button>
       <button id="btnCloseCustom">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="refundOverlay">
+    <div id="refundPanel">
+      <h2 id="refundTitle">Devolver</h2>
+      <div class="subtitle">Elige qué piezas se devuelven. Si devuelves todo, la venta se cancela completa.</div>
+      <div id="refundItemsBody"></div>
+      <div class="cash-line total"><span>A devolver</span><span id="refundAmount">$0.00</span></div>
+      <div class="set-label" style="margin-top:10px;">Motivo (opcional)</div>
+      <input id="refundReason" type="text" placeholder="Ej. producto defectuoso" />
+      <button id="btnConfirmRefund" class="cash-action-btn danger">Devolver e imprimir</button>
+      <button id="btnCloseRefund">Cancelar</button>
     </div>
   </div>
 
