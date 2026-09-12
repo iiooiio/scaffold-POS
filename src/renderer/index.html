@@ -955,6 +955,86 @@
     font-size: 13px;
   }
 
+  #discountOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+  }
+  #discountOverlay.show { display: flex; }
+  #discountPanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 380px;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #discountPanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #discountPanel .subtitle { font-size: 12px; color: var(--ink-soft); margin-bottom: 14px; }
+  #discountTypeRow { display: flex; gap: 8px; margin-bottom: 10px; }
+  .disc-type {
+    flex: 1;
+    padding: 9px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .disc-type.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  #discountValue {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 6px;
+    font-family: inherit;
+  }
+  #discountValue:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #btnCloseDiscount {
+    margin-top: 10px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  /* descuentos en el carrito */
+  .cart-line .cl-discount {
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+  }
+  .cart-line .cl-discount:hover { color: var(--accent); }
+  .cart-line .cl-discount.active { color: var(--accent); font-weight: 700; }
+  .cl-was {
+    text-decoration: line-through;
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 400;
+    margin-right: 4px;
+  }
+  #discountSummary {
+    display: none;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 2px 0 6px;
+  }
+  #discountSummary.show { display: flex; }
+  #btnTicketDiscount.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
   #settingsOverlay {
     position: fixed;
     inset: 0;
@@ -1081,6 +1161,8 @@
         <div id="cartEmpty">Toca un producto para agregarlo</div>
       </div>
 
+      <button id="btnTicketDiscount" class="cash-action-btn secondary" style="margin:4px 0 10px;">Descuento del ticket</button>
+
       <div id="paymentRow">
         <button class="pay-btn active" data-method="cash">Efectivo</button>
         <button class="pay-btn" data-method="card">Tarjeta</button>
@@ -1103,6 +1185,8 @@
         </label>
         <textarea id="noteText" placeholder="Se imprime al final del ticket..." rows="2"></textarea>
       </div>
+
+      <div id="discountSummary"><span>Descuentos</span><span id="discountSummaryAmount"></span></div>
 
       <div id="totalRow">
         <span class="label">Total</span>
@@ -1200,6 +1284,25 @@
       <input id="refundReason" type="text" placeholder="Ej. producto defectuoso" />
       <button id="btnConfirmRefund" class="cash-action-btn danger">Devolver e imprimir</button>
       <button id="btnCloseRefund">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="discountOverlay">
+    <div id="discountPanel">
+      <h2 id="discountTitle">Descuento</h2>
+      <div class="subtitle" id="discountSubtitle"></div>
+
+      <div id="discountTypeRow">
+        <button class="disc-type active" data-type="percent">Porcentaje (%)</button>
+        <button class="disc-type" data-type="amount">Monto ($)</button>
+      </div>
+
+      <input id="discountValue" type="number" step="0.01" min="0" placeholder="0" />
+      <div class="cash-line total"><span>Queda en</span><span id="discountPreview">$0.00</span></div>
+
+      <button id="btnApplyDiscount" class="cash-action-btn">Aplicar</button>
+      <button id="btnRemoveDiscount" class="cash-action-btn secondary">Quitar descuento</button>
+      <button id="btnCloseDiscount">Cancelar</button>
     </div>
   </div>
 
