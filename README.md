@@ -233,6 +233,52 @@ el del ticket. Si necesitas que Woo les calcule impuesto, cámbialo a `'taxable'
 **No cubre**: guardar los temporales para reutilizarlos después, ni descontar inventario
 (por definición no tienen existencias).
 
+## Origen de la orden (atribución) — y el bug que causó
+
+Las órdenes del POS se marcan con `_wc_order_attribution_source_type`. El valor se
+configura con `ORDER_ATTRIBUTION` y por default es `mobile_app`.
+
+**Historia del bug**: antes se mandaba `source_type: 'utm'` junto con `utm_source` y
+`utm_medium`. Con `source_type='utm'`, WooCommerce intenta renderizar además
+`utm_campaign`, `device_type` y `session_page_views` en los metaboxes "Order attribution"
+y "Customer history" del detalle de la orden. Al no existir esos metas, el sitio truena
+con error crítico justo en esas dos vistas. Por eso ahora se manda SOLO `source_type`,
+con un valor del enum que no arrastra campos acompañantes.
+
+Valores útiles para `ORDER_ATTRIBUTION`:
+- `mobile_app` (default) — el que usa la propia app móvil de WooCommerce.
+- `admin` — alternativa válida, se lee como "creada desde el panel".
+- `none` — no manda nada de atribución. Úsalo si algo sigue rompiéndose; Woo mostrará
+  el origen como desconocido, que es exactamente lo que pasa con órdenes anteriores a
+  que existiera la función, y lo maneja sin problema.
+
+### Limpiar las órdenes que ya quedaron dañadas
+
+Las órdenes creadas ANTES de este arreglo ya tienen el meta malo guardado, así que su
+detalle va a seguir tronando aunque actualices el POS. Hay que borrarles ese meta.
+**Respalda la base antes.** Con HPOS activo los metas viven en `wp_wc_orders_meta`; sin
+HPOS, en `wp_postmeta`. Ejecuta las dos por si acaso, ajustando el prefijo de tablas:
+
+```sql
+DELETE FROM wp_wc_orders_meta WHERE meta_key LIKE '_wc_order_attribution%';
+DELETE FROM wp_postmeta      WHERE meta_key LIKE '_wc_order_attribution%';
+```
+
+Eso borra la atribución de TODAS las órdenes, incluidas las de la tienda en línea. Si
+quieres conservar esas, limita por id de orden:
+
+```sql
+DELETE FROM wp_wc_orders_meta WHERE order_id = 123 AND meta_key LIKE '_wc_order_attribution%';
+DELETE FROM wp_postmeta       WHERE post_id  = 123 AND meta_key LIKE '_wc_order_attribution%';
+```
+
+### Confirmar el diagnóstico
+
+Para verificar que esto era la causa y no algo más: **WooCommerce → Estado → Logs**, y en
+el selector busca "Fatal Errors". El stack trace dirá exactamente qué archivo y línea
+tronaron. Si el error NO menciona order attribution, hay otra causa y conviene revisarla
+con ese log en mano.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
