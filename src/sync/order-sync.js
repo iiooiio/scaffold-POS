@@ -1,5 +1,5 @@
 const { getDb, nextLocalTicket } = require('../db/init');
-const { createOrder, cancelWooOrder, isOnline } = require('./woo-client');
+const { createOrder, cancelWooOrder, getOrder, createRefund, isOnline } = require('./woo-client');
 const { resolveWooCustomerId } = require('./customer-sync');
 const config = require('../config');
 
@@ -74,7 +74,17 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     } : {}),
   };
 
-  const displayItems = cartItems.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price }));
+  // Se guarda product_id/variation_id además del nombre: sin eso no hay forma de decirle
+  // a WooCommerce QUÉ línea devolver en una cancelación parcial (y por lo tanto tampoco
+  // de que reponga el inventario correcto).
+  const displayItems = cartItems.map((i) => ({
+    name: i.name,
+    quantity: i.quantity,
+    price: i.price,
+    product_id: i.custom ? null : i.product_id,
+    variation_id: i.variation_id || null,
+    custom: Boolean(i.custom),
+  }));
 
   db.prepare(`
     INSERT INTO orders_queue
@@ -250,11 +260,189 @@ function cancelOrder(orderId, reason = '') {
 
   db.prepare(`
     UPDATE orders_queue
-    SET status = ?, cancelled_at = ?, cancel_reason = ?
+    SET status = ?, cancelled_at = ?, cancel_reason = ?, refunded_total = COALESCE(total, 0)
     WHERE id = ?
   `).run(newStatus, new Date().toISOString(), reason, orderId);
 
   return { ...row, status: newStatus, needsSync: newStatus === 'cancel_pending' };
+}
+
+// Devolución PARCIAL. items: [{ index, quantity }] donde index apunta a la posición en
+// display_items de la orden. Devuelve el resumen para imprimir el comprobante.
+//
+// Si la devolución cubre el total de la venta, se trata como cancelación completa
+// (cancelOrder) en vez de refund: cancelar es más limpio que devolver el 100%.
+function refundOrderItems(orderId, items, reason = '') {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM orders_queue WHERE id = ?`).get(orderId);
+  if (!row) throw new Error(`Venta ${orderId} no encontrada`);
+  if (CANCELLED_STATUSES.includes(row.status)) throw new Error('Esta venta ya está cancelada');
+
+  const displayItems = JSON.parse(row.display_items_json || '[]');
+  if (displayItems.length === 0) {
+    throw new Error('Esta venta no tiene el detalle guardado (es anterior a esta función)');
+  }
+
+  const refundItems = [];
+  let amount = 0;
+
+  for (const sel of items) {
+    const item = displayItems[sel.index];
+    if (!item) throw new Error(`Línea ${sel.index} no existe en esta venta`);
+    const qty = Number(sel.quantity) || 0;
+    if (qty <= 0) continue;
+
+    const alreadyRefunded = getRefundedQuantity(db, orderId, sel.index);
+    if (qty + alreadyRefunded > item.quantity) {
+      throw new Error(`No puedes devolver ${qty} de "${item.name}": solo quedan ${item.quantity - alreadyRefunded}`);
+    }
+
+    const lineAmount = Math.round(item.price * qty * 100) / 100;
+    amount += lineAmount;
+    refundItems.push({
+      index: sel.index,
+      product_id: item.product_id,
+      variation_id: item.variation_id,
+      quantity: qty,
+      amount: lineAmount,
+      name: item.name,
+      custom: Boolean(item.custom),
+    });
+  }
+
+  if (refundItems.length === 0) throw new Error('No seleccionaste nada para devolver');
+
+  amount = Math.round(amount * 100) / 100;
+  const pendingTotal = Math.round(((row.total || 0) - (row.refunded_total || 0)) * 100) / 100;
+
+  if (amount >= pendingTotal) {
+    // Devolver todo lo que queda = cancelar la venta completa.
+    const result = cancelOrder(orderId, reason || 'Devolución total');
+    return { ...result, amount: pendingTotal, items: refundItems, fullCancellation: true };
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO refunds_queue (order_local_id, amount, items_json, reason, status, created_at)
+      VALUES (?, ?, ?, ?, 'pending', ?)
+    `).run(orderId, amount, JSON.stringify(refundItems), reason, new Date().toISOString());
+
+    db.prepare(`
+      UPDATE orders_queue SET refunded_total = COALESCE(refunded_total, 0) + ? WHERE id = ?
+    `).run(amount, orderId);
+  });
+  tx();
+
+  return {
+    local_ticket: row.local_ticket,
+    payment_method: row.payment_method,
+    amount,
+    items: refundItems,
+    fullCancellation: false,
+  };
+}
+
+// Cuánto se ha devuelto ya de una línea concreta, para no permitir devolver de más.
+function getRefundedQuantity(db, orderId, index) {
+  const rows = db.prepare(`
+    SELECT items_json FROM refunds_queue WHERE order_local_id = ? AND status != 'error'
+  `).all(orderId);
+
+  let total = 0;
+  for (const r of rows) {
+    for (const item of JSON.parse(r.items_json || '[]')) {
+      if (item.index === index) total += item.quantity;
+    }
+  }
+  return total;
+}
+
+// Devuelve el detalle de una venta con lo ya devuelto por línea, para pintar la UI.
+function getOrderRefundState(orderId) {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM orders_queue WHERE id = ?`).get(orderId);
+  if (!row) throw new Error(`Venta ${orderId} no encontrada`);
+
+  const displayItems = JSON.parse(row.display_items_json || '[]');
+  return {
+    id: row.id,
+    local_ticket: row.local_ticket,
+    total: row.total,
+    refunded_total: row.refunded_total || 0,
+    items: displayItems.map((item, index) => ({
+      ...item,
+      index,
+      refunded: getRefundedQuantity(db, orderId, index),
+      available: item.quantity - getRefundedQuantity(db, orderId, index),
+    })),
+  };
+}
+
+// Empuja a WooCommerce las devoluciones parciales pendientes.
+//
+// Los ids de línea los asigna Woo, así que hay que leer la orden de allá y emparejar por
+// product_id/variation_id. Si el emparejamiento falla (o la línea era un producto
+// temporal, que en Woo es un fee_line), se manda una devolución SOLO por monto: el
+// dinero queda correcto, pero Woo no repone inventario de esa línea.
+async function flushPendingRefunds() {
+  const db = getDb();
+  const pending = db.prepare(`
+    SELECT r.*, o.wc_order_id
+    FROM refunds_queue r
+    JOIN orders_queue o ON o.id = r.order_local_id
+    WHERE r.status = 'pending' AND o.wc_order_id IS NOT NULL
+  `).all();
+
+  let done = 0;
+  let failed = 0;
+
+  for (const refund of pending) {
+    try {
+      const items = JSON.parse(refund.items_json || '[]');
+      const payload = {
+        amount: refund.amount.toFixed(2),
+        reason: refund.reason || 'Devolución parcial desde POS',
+        api_restock: true,
+      };
+
+      try {
+        const wcOrder = await getOrder(refund.wc_order_id);
+        const lineItems = [];
+
+        for (const item of items) {
+          if (item.custom || !item.product_id) continue; // fee_line: solo monto
+          const match = (wcOrder.line_items || []).find(
+            (li) => li.product_id === item.product_id
+              && (item.variation_id ? li.variation_id === item.variation_id : true)
+          );
+          if (!match) continue;
+          lineItems.push({
+            id: match.id,
+            quantity: item.quantity,
+            refund_total: item.amount.toFixed(2),
+          });
+        }
+
+        if (lineItems.length > 0) payload.line_items = lineItems;
+      } catch (err) {
+        console.error(`[devolución] no se pudo leer la orden ${refund.wc_order_id}, se devuelve solo monto:`, err.message);
+      }
+
+      const created = await createRefund(refund.wc_order_id, payload);
+      db.prepare(`
+        UPDATE refunds_queue SET status = 'done', wc_refund_id = ?, synced_at = ?, error_message = NULL
+        WHERE id = ?
+      `).run(created.id, new Date().toISOString(), refund.id);
+      done += 1;
+    } catch (err) {
+      db.prepare(`UPDATE refunds_queue SET status = 'error', error_message = ? WHERE id = ?`)
+        .run(err.message, refund.id);
+      console.error(`[devolución] fallo en la devolución ${refund.id}:`, err.message);
+      failed += 1;
+    }
+  }
+
+  return { attempted: pending.length, done, failed };
 }
 
 // Empuja a WooCommerce las cancelaciones de órdenes que ya existían allá.
@@ -294,4 +482,7 @@ module.exports = {
   getOrderForReprint,
   cancelOrder,
   flushPendingCancellations,
+  refundOrderItems,
+  getOrderRefundState,
+  flushPendingRefunds,
 };
