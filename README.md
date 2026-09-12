@@ -338,6 +338,47 @@ lista.
 **No cubre**: cupones de WooCommerce (`coupon_lines`), ni descuentos automáticos por
 reglas (3x2, por categoría, por cliente).
 
+## Mantenimiento: respaldo y limpieza de caché
+
+Botón **Mantenimiento** en el riel. Muestra cuánto ocupa cada cosa (productos,
+variaciones, clientes, ventas, imágenes, tamaño de la base) y ofrece las dos operaciones.
+
+### Respaldo de la base local
+
+Se hace automáticamente **al arrancar la app** y **cada 6 horas**, más un botón
+"Respaldar ahora". Se conservan los 10 más recientes; los viejos se borran solos para que
+la carpeta no crezca sin límite. Hay un botón para abrir la carpeta en el explorador.
+
+Usa `db.backup()` de better-sqlite3, **no una copia del archivo**. Copiar el `.db` a mano
+mientras la app escribe puede producir un respaldo corrupto, y con WAL activo además deja
+fuera lo que todavía está en el `-wal`.
+
+**Para restaurar**: cierra la app, reemplaza `pos-local.db` en la carpeta de datos con el
+respaldo (renombrándolo) y vuelve a abrir. Borra también los archivos `-wal` y `-shm` si
+existen.
+
+### Limpieza de caché
+
+Borra de esta caja los productos y clientes que ya no existen en la tienda en línea, más
+las imágenes que quedaron sueltas en disco.
+
+Es necesaria porque el sync incremental (`modified_after`) **nunca reporta
+eliminaciones**: un producto borrado simplemente deja de venir, y eso es indistinguible
+de uno que no cambió. Por eso la limpieza pregunta a Woo la lista de ids que siguen
+existiendo (con `_fields=id`, para que la respuesta sea mínima) y requiere conexión.
+
+Protecciones, todas deliberadas:
+
+- **Hace un respaldo automático antes de borrar nada.**
+- **Aborta si Woo devuelve cero productos.** Un catálogo vacío es casi siempre una
+  respuesta rara, y borrar todo por una lectura mala sería peor que no limpiar.
+- **No toca las ventas.** Son el historial de esta caja, incluyen reimpresiones y cortes,
+  y nada de eso se puede recuperar de Woo.
+- **No borra clientes creados sin conexión** (`pending_sync = 1`): todavía no existen en
+  Woo, así que "no estar en Woo" no significa que se hayan eliminado.
+- **No borra clientes referenciados por ventas sin sincronizar**: esas ventas fallarían al
+  subir.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
