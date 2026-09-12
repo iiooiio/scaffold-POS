@@ -21,4 +21,10 @@ contextBridge.exposeInMainWorld('pos', {
   retryOrder: (orderId) => ipcRenderer.invoke('queue:retry-order', orderId),
   resolveManually: (orderId, note) => ipcRenderer.invoke('queue:resolve-manually', { orderId, note }),
   onQueueUpdated: (callback) => ipcRenderer.on('queue:updated', (_e, data) => callback(data)),
+  getCashSession: () => ipcRenderer.invoke('cash:current'),
+  openCashSession: (openingFloat) => ipcRenderer.invoke('cash:open', openingFloat),
+  addCashMovement: (movement) => ipcRenderer.invoke('cash:add-movement', movement),
+  getCashMovements: () => ipcRenderer.invoke('cash:movements'),
+  closeCashSession: (countedAmount) => ipcRenderer.invoke('cash:close', countedAmount),
+  toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
