@@ -96,6 +96,29 @@ async function fetchAllCustomers() {
   return all;
 }
 
+async function wcPut(pathname, body) {
+  const res = await fetch(buildUrl(pathname), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = data && data.message ? data.message : `HTTP ${res.status}`;
+    const err = new Error(`WC PUT ${pathname} -> ${msg}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// WooCommerce devuelve el stock al cambiar una orden a 'cancelled', así que no hay que
+// reponer inventario a mano.
+async function cancelWooOrder(wcOrderId) {
+  return wcPut(`/orders/${wcOrderId}`, { status: 'cancelled' });
+}
+
 async function createOrder(orderPayload) {
   return wcPost('/orders', orderPayload);
 }
@@ -111,4 +134,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createOrder, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createOrder, cancelWooOrder, isOnline };
