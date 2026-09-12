@@ -69,7 +69,41 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
   await thermalPrinter.execute();
 }
 
-module.exports = { printTicket, printCashReport };
+module.exports = { printTicket, printCashReport, printCancellation };
+
+// Comprobante de cancelación: deja constancia física de que se devolvió el dinero.
+async function printCancellation({ localTicket, total, reason, paymentMethod }) {
+  const thermalPrinter = buildPrinter();
+
+  const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
+  if (!isConnected) {
+    throw new Error('Impresora no detectada (revisa cable USB / PRINTER_INTERFACE en .env)');
+  }
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.bold(true);
+  thermalPrinter.println('*** VENTA CANCELADA ***');
+  thermalPrinter.bold(false);
+  thermalPrinter.println(localTicket);
+  thermalPrinter.println(new Date().toLocaleString());
+  thermalPrinter.drawLine();
+
+  thermalPrinter.alignLeft();
+  thermalPrinter.println(`Monto devuelto: $${(total || 0).toFixed(2)}`);
+  thermalPrinter.println(`Pago original: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
+  if (reason && reason.trim()) {
+    thermalPrinter.newLine();
+    thermalPrinter.println('Motivo:');
+    thermalPrinter.println(reason.trim());
+  }
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.newLine();
+  thermalPrinter.println('Firma: ____________________');
+  thermalPrinter.cut();
+
+  await thermalPrinter.execute();
+}
 
 // Imprime el corte de caja al cerrar el turno.
 async function printCashReport(summary) {
