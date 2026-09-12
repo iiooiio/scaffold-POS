@@ -562,7 +562,8 @@ async function renderCustomerList(search) {
     row.className = 'customer-row';
     row.innerHTML = `
       <div class="cr-name">${customerDisplayName(c)}</div>
-      <div class="cr-detail">${[c.email, c.phone].filter(Boolean).join(' · ')}</div>
+      <div class="cr-detail">${[c.phone, c.whatsapp ? `WA ${c.whatsapp}` : null, c.email].filter(Boolean).join(' · ')}</div>
+      ${c.pending_sync ? '<div class="cr-pending">Pendiente de crearse en WooCommerce</div>' : ''}
     `;
     row.onclick = () => {
       selectedCustomer = c;
@@ -576,6 +577,7 @@ async function renderCustomerList(search) {
 document.getElementById('btnSelectCustomer').addEventListener('click', () => {
   document.getElementById('customerOverlay').classList.add('show');
   document.getElementById('customerSearch').value = '';
+  resetNewCustomerForm();
   renderCustomerList();
 });
 document.getElementById('btnClearCustomer').addEventListener('click', () => {
@@ -586,6 +588,60 @@ document.getElementById('btnCloseCustomers').addEventListener('click', () => {
   document.getElementById('customerOverlay').classList.remove('show');
 });
 document.getElementById('customerSearch').addEventListener('input', (e) => renderCustomerList(e.target.value));
+
+const NEW_CUSTOMER_INPUTS = ['ncFirstName', 'ncLastName', 'ncPhone', 'ncWhatsapp'];
+
+function resetNewCustomerForm() {
+  NEW_CUSTOMER_INPUTS.forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('newCustomerForm').classList.remove('show');
+}
+
+document.getElementById('btnShowNewCustomer').addEventListener('click', () => {
+  const form = document.getElementById('newCustomerForm');
+  form.classList.toggle('show');
+  if (form.classList.contains('show')) {
+    // Si venía escribiendo una búsqueda, se aprovecha como nombre.
+    const typed = document.getElementById('customerSearch').value.trim();
+    if (typed && !typed.includes('@')) document.getElementById('ncFirstName').value = typed;
+    document.getElementById('ncFirstName').focus();
+  }
+});
+
+document.getElementById('btnCreateCustomer').addEventListener('click', async (e) => {
+  const firstName = document.getElementById('ncFirstName').value.trim();
+  const lastName = document.getElementById('ncLastName').value.trim();
+  if (!firstName && !lastName) {
+    showToast('Captura al menos un nombre.', true);
+    return;
+  }
+
+  e.target.disabled = true;
+  e.target.textContent = 'Creando...';
+
+  try {
+    const created = await window.pos.createCustomer({
+      first_name: firstName,
+      last_name: lastName,
+      phone: document.getElementById('ncPhone').value.trim(),
+      whatsapp: document.getElementById('ncWhatsapp').value.trim(),
+    });
+
+    selectedCustomer = created;
+    updateCustomerButton();
+    resetNewCustomerForm();
+    document.getElementById('customerOverlay').classList.remove('show');
+    showToast(
+      created.created_in_woo
+        ? `Cliente creado: ${customerDisplayName(created)}`
+        : `Cliente guardado sin conexión: se creará en WooCommerce al sincronizar`
+    );
+  } catch (err) {
+    showToast(err.message, true);
+  }
+
+  e.target.disabled = false;
+  e.target.textContent = 'Crear y seleccionar';
+});
 
 // ---------- Control de efectivo ----------
 
@@ -835,9 +891,9 @@ async function refreshPriceAdjustmentNotice() {
   const notice = document.getElementById('priceAdjNotice');
   if (pct) {
     document.getElementById('priceAdjValue').textContent = `${pct > 0 ? '+' : ''}${pct}%`;
-    notice.style.display = 'flex';
+    notice.classList.add('show');
   } else {
-    notice.style.display = 'none';
+    notice.classList.remove('show');
   }
 }
 
