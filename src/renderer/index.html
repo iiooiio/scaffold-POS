@@ -862,6 +862,37 @@
     cursor: pointer;
     font-size: 13px;
   }
+  /* ---------- Animaciones al agregar al carrito ---------- */
+  @keyframes tilePop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(0.95); border-color: var(--accent); }
+    100% { transform: scale(1); }
+  }
+  .product-tile.just-added { animation: tilePop 0.45s ease; }
+
+  @keyframes lineSlideIn {
+    0%   { opacity: 0; transform: translateX(14px); background: #EAF3F0; }
+    60%  { opacity: 1; transform: translateX(0); background: #EAF3F0; }
+    100% { background: transparent; }
+  }
+  .cart-line.just-added { animation: lineSlideIn 0.5s ease; }
+
+  @keyframes totalPulse {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.09); color: var(--accent); }
+    100% { transform: scale(1); }
+  }
+  #totalRow .amount.pulse {
+    animation: totalPulse 0.45s ease;
+    display: inline-block;
+    transform-origin: right center;
+  }
+
+  /* Venta cancelada en el panel de ventas */
+  .sale-row.cancelled { opacity: 0.6; background: var(--warn-bg); border-color: var(--warn-border); }
+  .sale-row.cancelled .sr-ticket { text-decoration: line-through; }
+  .sale-row.cancelled .sr-meta { color: var(--warn); font-weight: 600; }
+  .sale-row button.danger { border-color: var(--warn-border); color: var(--warn); }
 </style>
 </head>
 <body>
