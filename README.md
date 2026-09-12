@@ -164,6 +164,29 @@ comportamiento típico de estos lectores, pero no lo probé con hardware. Si tu 
 más lento y los escaneos no se detectan, sube `SCAN_MAX_GAP_MS` en
 `src/renderer/renderer.js`.
 
+## Cancelaciones
+
+Desde el panel **Ventas** puedes cancelar una venta. Qué pasa depende de si ya llegó a
+WooCommerce:
+
+- **Aún no sincronizada** → se marca cancelada localmente y nunca se envía a Woo.
+- **Ya sincronizada** → se marca `cancel_pending` y el ciclo de sincronización le cambia
+  el estado a `cancelled` en WooCommerce. Woo devuelve el stock automáticamente al
+  cancelar, así que no hay que reponer inventario a mano.
+
+Funciona sin conexión: la cancelación local es inmediata y válida para el corte aunque
+Woo no responda todavía.
+
+**Restricción a propósito: solo se cancelan ventas del turno ABIERTO.** Cancelar una de
+un turno ya cerrado cambiaría retroactivamente un corte ya firmado, y además el efectivo
+devuelto saldría del cajón de hoy y no del de ese día. Para devoluciones de días
+anteriores, registra un **retiro** en el panel de Caja con el motivo.
+
+Se imprime un comprobante de cancelación con monto devuelto, motivo y espacio de firma.
+
+**No cubre**: cancelaciones parciales (devolver solo algunos artículos de un ticket).
+Es todo o nada.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
