@@ -1,12 +1,32 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
+const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
 const { printTicket } = require('./print/printer');
 
 let mainWindow;
+let logoLocalPath = null;
+
+// Descarga el logo una sola vez (no depende del sync de catálogo, es un archivo aparte).
+// Si LOGO_URL no está configurado en .env, no hace nada y la UI simplemente no muestra logo.
+async function downloadLogoIfConfigured() {
+  if (!config.logoUrl) return;
+  try {
+    const res = await fetch(config.logoUrl, { headers: { 'User-Agent': 'pos-electron/0.1' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const ext = path.extname(new URL(config.logoUrl).pathname) || '.png';
+    const filePath = path.join(app.getPath('userData'), `logo${ext}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(filePath, buffer);
+    logoLocalPath = filePath;
+  } catch (err) {
+    console.error('[logo] fallo al descargar:', err.message);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -21,8 +41,29 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-app.whenReady().then(() => {
+// Si ya se descargó en una corrida anterior, usarlo de inmediato (offline-friendly).
+// No sabemos la extensión de antemano, así que se busca por prefijo en el directorio.
+function findCachedLogo() {
+  const dir = app.getPath('userData');
+  try {
+    const match = fs.readdirSync(dir).find((f) => f.startsWith('logo.'));
+    return match ? path.join(dir, match) : null;
+  } catch {
+    return null;
+  }
+}
+
+app.whenReady().then(async () => {
   getDb(); // fuerza creación de tablas al arrancar
+
+  logoLocalPath = findCachedLogo();
+  if (logoLocalPath) {
+    // Ya hay uno cacheado: no bloquea el arranque, se refresca en segundo plano.
+    downloadLogoIfConfigured();
+  } else {
+    // Primera vez: sí esperamos, para que se vea desde el primer arranque.
+    await downloadLogoIfConfigured();
+  }
 
   createWindow();
 
@@ -45,6 +86,12 @@ app.whenReady().then(() => {
     }
   }, config.syncIntervalMs);
 
+  // Intervalo aparte para clientes, más espaciado -- ver comentario en config.js.
+  syncCustomers().catch((err) => console.error('[sync clientes] fallo en el arranque:', err.message));
+  setInterval(() => {
+    syncCustomers().catch((err) => console.error('[sync clientes] fallo:', err.message));
+  }, config.customersSyncIntervalMs);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -57,13 +104,16 @@ app.on('window-all-closed', () => {
 // ---- IPC: puente entre la UI (renderer) y la lógica de negocio ----
 
 ipcMain.handle('app:register-id', () => config.registerId);
+ipcMain.handle('app:logo-path', () => logoLocalPath);
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
 ipcMain.handle('catalog:get-products', async (_e, { search } = {}) => getLocalProducts({ search }));
 ipcMain.handle('catalog:get-variations', async (_e, productId) => getLocalVariations(productId));
+ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers({ search }));
+ipcMain.handle('customers:sync-now', async () => syncCustomers());
 
-ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note }) => {
+ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId }) => {
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const { localTicket } = queueOrder({ cartItems, paymentMethod, cashInfo, customerNote: note || '' });
+  const { localTicket } = queueOrder({ cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId });
 
   // Se imprime de inmediato, sin esperar a que sincronice con WooCommerce.
   try {
