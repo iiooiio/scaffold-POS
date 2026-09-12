@@ -120,6 +120,19 @@
     padding: 20px 24px;
     overflow: hidden;
   }
+  #priceAdjNotice {
+    display: none;
+    width: 100%;
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn);
+    border-radius: var(--radius);
+    padding: 9px 14px;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  #priceAdjNotice.show { display: block; }
+
   #searchRow {
     display: flex;
     gap: 10px;
@@ -600,6 +613,20 @@
   }
   #btnClearCustomer.show { display: block; }
 
+  #newCustomerForm { display: none; flex-direction: column; margin-top: 12px; }
+  #newCustomerForm.show { display: flex; }
+  #newCustomerForm input {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 8px;
+    font-family: inherit;
+  }
+  #newCustomerForm input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #newCustomerForm .set-label { margin-bottom: 4px; }
+  .customer-row .cr-pending { color: var(--warn); font-size: 11px; font-weight: 600; }
+
   #customerOverlay {
     position: fixed;
     inset: 0;
@@ -911,11 +938,6 @@
         <span class="rail-value" id="lastTicket">—</span>
       </div>
 
-      <div class="rail-section" id="priceAdjNotice" style="display:none;">
-        <span class="rail-label">Ajuste de precios</span>
-        <span class="rail-value" id="priceAdjValue"></span>
-      </div>
-
       <div class="rail-section">
         <span class="rail-label">Catálogo</span>
         <span class="rail-value" id="catalogSyncedAt">sin sincronizar</span>
@@ -929,6 +951,9 @@
     </div>
 
     <div id="catalog">
+      <div id="priceAdjNotice">
+        Precios con ajuste de <strong id="priceAdjValue"></strong> sobre el catálogo de WooCommerce
+      </div>
       <div id="searchRow">
         <input id="search" placeholder="Buscar producto o SKU..." />
       </div>
@@ -1003,6 +1028,21 @@
       <h2>Buscar cliente</h2>
       <input id="customerSearch" placeholder="Nombre, correo o teléfono..." />
       <div id="customerListBody"></div>
+
+      <button id="btnShowNewCustomer" class="cash-action-btn secondary">+ Cliente nuevo</button>
+
+      <div id="newCustomerForm">
+        <div class="set-label">Nombre</div>
+        <input id="ncFirstName" type="text" placeholder="Nombre" />
+        <div class="set-label">Apellido</div>
+        <input id="ncLastName" type="text" placeholder="Apellido" />
+        <div class="set-label">Teléfono (opcional)</div>
+        <input id="ncPhone" type="tel" placeholder="55 1234 5678" />
+        <div class="set-label">WhatsApp (opcional)</div>
+        <input id="ncWhatsapp" type="tel" placeholder="52 55 1234 5678" />
+        <button id="btnCreateCustomer" class="cash-action-btn">Crear y seleccionar</button>
+      </div>
+
       <button id="btnCloseCustomers">Cancelar</button>
     </div>
   </div>
