@@ -77,6 +77,25 @@ async function fetchProductVariations(productId) {
   return all;
 }
 
+// Trae TODOS los clientes. Sin modified_after -- Woo NO soporta sync incremental en este
+// endpoint (confirmado: es un feature request abierto desde hace años, nunca lo
+// agregaron). Por eso esto se llama en un intervalo aparte y más espaciado que el de
+// catálogo, no en cada tick del sync normal.
+async function fetchAllCustomers() {
+  const perPage = 100;
+  let page = 1;
+  const all = [];
+
+  while (true) {
+    const batch = await wcGet('/customers', { per_page: perPage, page, orderby: 'id', order: 'asc' });
+    all.push(...batch);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+
+  return all;
+}
+
 async function createOrder(orderPayload) {
   return wcPost('/orders', orderPayload);
 }
@@ -92,4 +111,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, createOrder, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createOrder, isOnline };
