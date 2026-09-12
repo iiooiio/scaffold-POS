@@ -589,7 +589,7 @@ document.getElementById('btnCloseCustomers').addEventListener('click', () => {
 });
 document.getElementById('customerSearch').addEventListener('input', (e) => renderCustomerList(e.target.value));
 
-const NEW_CUSTOMER_INPUTS = ['ncFirstName', 'ncLastName', 'ncPhone', 'ncWhatsapp'];
+const NEW_CUSTOMER_INPUTS = ['ncFirstName', 'ncLastName', 'ncWhatsapp'];
 
 function resetNewCustomerForm() {
   NEW_CUSTOMER_INPUTS.forEach((id) => { document.getElementById(id).value = ''; });
@@ -622,7 +622,6 @@ document.getElementById('btnCreateCustomer').addEventListener('click', async (e)
     const created = await window.pos.createCustomer({
       first_name: firstName,
       last_name: lastName,
-      phone: document.getElementById('ncPhone').value.trim(),
       whatsapp: document.getElementById('ncWhatsapp').value.trim(),
     });
 
@@ -774,11 +773,37 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
   document.getElementById('cashOverlay').classList.remove('show');
 });
 
-// F11 para salir/entrar de pantalla completa (no hay menú que lo ofrezca).
+// Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
+const OVERLAYS_TOP_FIRST = [
+  'settingsOverlay',
+  'cashOverlay',
+  'salesOverlay',
+  'customerOverlay',
+  'variationOverlay',
+  'errorOverlay',
+];
+
+function closeTopmostOverlay() {
+  for (const id of OVERLAYS_TOP_FIRST) {
+    const overlay = document.getElementById(id);
+    if (overlay.classList.contains('show')) {
+      overlay.classList.remove('show');
+      return true;
+    }
+  }
+  return false;
+}
+
 document.addEventListener('keydown', (e) => {
+  // F11 para salir/entrar de pantalla completa (no hay menú que lo ofrezca).
   if (e.key === 'F11') {
     e.preventDefault();
     window.pos.toggleFullscreen();
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    if (closeTopmostOverlay()) e.preventDefault();
   }
 });
 
