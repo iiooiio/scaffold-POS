@@ -308,6 +308,15 @@ document.getElementById('noteCheckbox').addEventListener('change', (e) => {
 
 document.getElementById('btnCheckout').addEventListener('click', async () => {
   if (cart.length === 0) return;
+
+  // Sin turno abierto no se puede cobrar (el corte no cuadraría). En vez de soltar un
+  // error y dejarlo atorado, se le abre el panel para que abra caja ahí mismo.
+  if (!cashSession) {
+    showToast('Abre la caja antes de cobrar.', true);
+    openCashPanel();
+    return;
+  }
+
   const btn = document.getElementById('btnCheckout');
   btn.disabled = true;
   btn.textContent = 'Procesando...';
@@ -570,6 +579,9 @@ async function renderCashPanel() {
   const body = document.getElementById('cashBody');
   await refreshCashState();
 
+  // Con la caja cerrada, "Cerrar" se leería como "cerrar la caja". Es solo descartar.
+  document.getElementById('btnCloseCash').textContent = cashSession ? 'Cerrar' : 'Ahora no';
+
   if (!cashSession) {
     body.innerHTML = `
       <div class="cash-section-title">Fondo inicial en el cajón</div>
@@ -667,10 +679,12 @@ async function renderCashPanel() {
   };
 }
 
-document.getElementById('btnCash').addEventListener('click', () => {
+function openCashPanel() {
   document.getElementById('cashOverlay').classList.add('show');
   renderCashPanel();
-});
+}
+
+document.getElementById('btnCash').addEventListener('click', openCashPanel);
 document.getElementById('btnCloseCash').addEventListener('click', () => {
   document.getElementById('cashOverlay').classList.remove('show');
 });
@@ -681,6 +695,64 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     window.pos.toggleFullscreen();
   }
+});
+
+// ---------- Ventas recientes / reimpresión ----------
+
+const STATUS_LABELS = {
+  pending: 'por sincronizar',
+  synced: 'sincronizada',
+  error: 'con error',
+  resolved_manually: 'resuelta manual',
+};
+
+async function renderSalesPanel() {
+  const body = document.getElementById('salesBody');
+  body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando...</div>';
+
+  const orders = await window.pos.getRecentOrders();
+  body.innerHTML = '';
+
+  if (orders.length === 0) {
+    body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Todavía no hay ventas en esta caja.</div>';
+    return;
+  }
+
+  for (const o of orders) {
+    const row = document.createElement('div');
+    row.className = 'sale-row';
+    const when = new Date(o.created_at).toLocaleString();
+    const pay = o.payment_method === 'card' ? 'Tarjeta' : o.payment_method === 'cash' ? 'Efectivo' : '—';
+    row.innerHTML = `
+      <div class="sr-info">
+        <div class="sr-ticket">${o.local_ticket}</div>
+        <div class="sr-meta">${when} · ${pay} · ${STATUS_LABELS[o.status] || o.status}</div>
+      </div>
+      <span class="sr-total">${money(o.total)}</span>
+      <button data-action="reprint">Reimprimir</button>
+    `;
+    row.querySelector('[data-action="reprint"]').onclick = async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = 'Imprimiendo...';
+      try {
+        await window.pos.reprintOrder(o.id);
+        showToast(`Ticket ${o.local_ticket} reimpreso.`);
+      } catch (err) {
+        showToast(`No se pudo reimprimir: ${err.message}`, true);
+      }
+      e.target.disabled = false;
+      e.target.textContent = 'Reimprimir';
+    };
+    body.appendChild(row);
+  }
+}
+
+document.getElementById('btnSales').addEventListener('click', () => {
+  document.getElementById('salesOverlay').classList.add('show');
+  renderSalesPanel();
+});
+document.getElementById('btnCloseSales').addEventListener('click', () => {
+  document.getElementById('salesOverlay').classList.remove('show');
 });
 
 // ---------- Arranque ----------
@@ -714,6 +786,11 @@ document.addEventListener('keydown', (e) => {
   loadProducts();
   renderCart();
   refreshErrorBadge();
-  refreshCashState();
+
+  // Si no hay turno abierto, el panel de caja se abre solo: abrir caja es lo primero
+  // del día, no algo que el cajero deba ir a buscar en el riel.
+  await refreshCashState();
+  if (!cashSession) openCashPanel();
+
   setInterval(() => { refreshErrorBadge(); refreshCashState(); }, 15000);
 })();
