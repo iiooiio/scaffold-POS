@@ -1,10 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { pathToFileURL } = require('url');
 
+// NO usar require() de módulos de Node aquí (ni 'url', ni 'path', ni 'fs').
+// Desde Electron 20 el preload corre sandboxed por default y solo expone un subconjunto
+// de módulos; un require no soportado tumba el preload entero, window.pos queda
+// undefined, y la UI falla sin mensaje visible. Toda conversión de rutas a file://
+// se hace en main.js, que sí tiene Node completo.
 contextBridge.exposeInMainWorld('pos', {
   getRegisterId: () => ipcRenderer.invoke('app:register-id'),
-  getLogoPath: () => ipcRenderer.invoke('app:logo-path'),
-  toFileUrl: (localPath) => (localPath ? pathToFileURL(localPath).href : null),
+  getLogoUrl: () => ipcRenderer.invoke('app:logo-url'),
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
   getVariations: (productId) => ipcRenderer.invoke('catalog:get-variations', productId),
