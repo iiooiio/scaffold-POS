@@ -1,6 +1,7 @@
 let cart = []; // { product_id, variation_id (null si es simple), name, price, quantity, manage_stock, stock_quantity }
 let selectedCategory = 'all';
 let paymentMethod = 'cash';
+let selectedCustomer = null; // { id, first_name, last_name, email, phone }
 let allProducts = []; // cache local para filtrar categorías sin volver a pedir a la DB
 
 // ---------- Utilidades ----------
@@ -319,7 +320,7 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   const note = noteChecked ? document.getElementById('noteText').value.trim() : '';
 
   try {
-    const result = await window.pos.checkout(cart, paymentMethod, { received, change }, note);
+    const result = await window.pos.checkout(cart, paymentMethod, { received, change }, note, selectedCustomer?.id);
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -332,6 +333,8 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
     document.getElementById('noteCheckbox').checked = false;
     document.getElementById('noteText').value = '';
     document.getElementById('noteText').classList.remove('show');
+    selectedCustomer = null;
+    updateCustomerButton();
     renderCart();
   } catch (err) {
     showToast(`Error al cobrar: ${err.message}`, true);
@@ -349,7 +352,10 @@ document.getElementById('btnSyncCatalog').addEventListener('click', async () => 
   try {
     const result = await window.pos.syncCatalogNow();
     label.textContent = new Date(result.syncedAt).toLocaleTimeString();
-    showToast(`Catálogo actualizado (${result.count} productos).`);
+    const imgMsg = result.imagesFailed > 0
+      ? ` — ${result.imagesOk} imágenes bajadas, ${result.imagesFailed} fallaron (ver consola)`
+      : result.imagesOk > 0 ? ` — ${result.imagesOk} imágenes bajadas` : '';
+    showToast(`Catálogo actualizado (${result.count} productos).${imgMsg}`, result.imagesFailed > 0);
   } catch (err) {
     label.textContent = 'Error de sync';
     showToast(`No se pudo sincronizar (¿sin conexión?): ${err.message}`, true);
@@ -483,11 +489,81 @@ document.getElementById('btnCloseVariations').addEventListener('click', () => {
   document.getElementById('variationOverlay').classList.remove('show');
 });
 
+// ---------- Selector de cliente ----------
+
+function customerDisplayName(c) {
+  const name = [c.first_name, c.last_name].filter(Boolean).join(' ');
+  return name || c.email || c.phone || `Cliente #${c.id}`;
+}
+
+function updateCustomerButton() {
+  const btn = document.getElementById('btnSelectCustomer');
+  const clearBtn = document.getElementById('btnClearCustomer');
+  if (selectedCustomer) {
+    btn.textContent = `Cliente: ${customerDisplayName(selectedCustomer)}`;
+    btn.classList.add('has-customer');
+    clearBtn.classList.add('show');
+  } else {
+    btn.textContent = 'Cliente: Ninguno';
+    btn.classList.remove('has-customer');
+    clearBtn.classList.remove('show');
+  }
+}
+
+async function renderCustomerList(search) {
+  const body = document.getElementById('customerListBody');
+  const customers = await window.pos.getCustomers(search);
+  body.innerHTML = '';
+
+  if (customers.length === 0) {
+    body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Sin resultados.</div>';
+    return;
+  }
+
+  for (const c of customers) {
+    const row = document.createElement('button');
+    row.className = 'customer-row';
+    row.innerHTML = `
+      <div class="cr-name">${customerDisplayName(c)}</div>
+      <div class="cr-detail">${[c.email, c.phone].filter(Boolean).join(' · ')}</div>
+    `;
+    row.onclick = () => {
+      selectedCustomer = c;
+      updateCustomerButton();
+      document.getElementById('customerOverlay').classList.remove('show');
+    };
+    body.appendChild(row);
+  }
+}
+
+document.getElementById('btnSelectCustomer').addEventListener('click', () => {
+  document.getElementById('customerOverlay').classList.add('show');
+  document.getElementById('customerSearch').value = '';
+  renderCustomerList();
+});
+document.getElementById('btnClearCustomer').addEventListener('click', () => {
+  selectedCustomer = null;
+  updateCustomerButton();
+});
+document.getElementById('btnCloseCustomers').addEventListener('click', () => {
+  document.getElementById('customerOverlay').classList.remove('show');
+});
+document.getElementById('customerSearch').addEventListener('input', (e) => renderCustomerList(e.target.value));
+
 // ---------- Arranque ----------
 
 (async function init() {
   document.getElementById('railRegisterName').textContent = await window.pos.getRegisterId();
+
+  const logoPath = await window.pos.getLogoPath();
+  if (logoPath) {
+    const img = document.getElementById('railLogo');
+    img.src = window.pos.toFileUrl(logoPath);
+    img.style.display = 'block';
+  }
+
   updateConnDot();
+  updateCustomerButton();
   loadProducts();
   renderCart();
   refreshErrorBadge();
