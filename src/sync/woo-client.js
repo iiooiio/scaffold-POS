@@ -129,6 +129,25 @@ async function createRefund(wcOrderId, refundPayload) {
   return wcPost(`/orders/${wcOrderId}/refunds`, refundPayload);
 }
 
+// Solo los ids, para detectar qué se borró en Woo. El sync incremental por
+// modified_after nunca reporta eliminaciones: un producto borrado simplemente deja de
+// venir, y sin esta lista no hay forma de distinguirlo de uno que no cambió.
+// _fields=id hace la respuesta mínima aunque el catálogo sea grande.
+async function fetchAllIds(resource) {
+  const perPage = 100;
+  let page = 1;
+  const ids = new Set();
+
+  while (true) {
+    const batch = await wcGet(`/${resource}`, { per_page: perPage, page, _fields: 'id' });
+    for (const row of batch) ids.add(row.id);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+
+  return ids;
+}
+
 async function createCustomer(customerPayload) {
   return wcPost('/customers', customerPayload);
 }
@@ -148,4 +167,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, getOrder, createRefund, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, getOrder, createRefund, fetchAllIds, isOnline };
