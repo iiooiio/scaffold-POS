@@ -119,6 +119,16 @@ async function cancelWooOrder(wcOrderId) {
   return wcPut(`/orders/${wcOrderId}`, { status: 'cancelled' });
 }
 
+// Se necesita para las devoluciones parciales: los ids de línea de una orden los asigna
+// WooCommerce, así que hay que leerlos de allá para decirle qué línea devolver.
+async function getOrder(wcOrderId) {
+  return wcGet(`/orders/${wcOrderId}`);
+}
+
+async function createRefund(wcOrderId, refundPayload) {
+  return wcPost(`/orders/${wcOrderId}/refunds`, refundPayload);
+}
+
 async function createCustomer(customerPayload) {
   return wcPost('/customers', customerPayload);
 }
@@ -138,4 +148,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, getOrder, createRefund, isOnline };
