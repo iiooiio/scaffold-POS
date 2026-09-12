@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('pos', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   saveConfig: (values) => ipcRenderer.invoke('config:save', values),
   findBySku: (sku) => ipcRenderer.invoke('catalog:find-by-sku', sku),
+  getPriceAdjustment: () => ipcRenderer.invoke('app:price-adjustment'),
   getLogoUrl: () => ipcRenderer.invoke('app:logo-url'),
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
