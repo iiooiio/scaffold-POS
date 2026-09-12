@@ -237,9 +237,35 @@ real que el total de la orden en Woo coincida con el ticket impreso.
   lo soporta en este endpoint) en un intervalo aparte y más espaciado
   (`CUSTOMERS_SYNC_INTERVAL_MS`, default 10 min), y selector con búsqueda en el carrito.
   La orden manda `customer_id` a Woo cuando hay cliente seleccionado.
-  **No cubre**: crear clientes nuevos desde el POS (solo asocia existentes), ni borrar
-  clientes que se eliminaron en Woo (quedan en la caché local hasta que alguien limpie
-  la base a mano).
+  Desde el buscador de clientes hay un botón **+ Cliente nuevo**. Solo se pide nombre;
+  teléfono y WhatsApp son opcionales.
+
+  **Correo generado automáticamente**: WooCommerce exige un email único por cliente, pero
+  en mostrador nadie lo pide, así que se genera desde el nombre
+  (`juan-perez@pos.com`, con acentos normalizados y sufijo `-2`, `-3`... si ya existe).
+  El dominio se configura con `POS_EMAIL_DOMAIN` (default `pos.com`).
+
+  **Vale la pena cambiarlo**: `pos.com` es un dominio real de un tercero. Nunca se le
+  envía correo desde aquí, pero si algún día conectas cualquier automatización de email
+  en WooCommerce, esos mensajes saldrían hacia un dominio ajeno. Lo más seguro es usar un
+  subdominio propio (`pos.tu-sitio.com`) o `pos.invalid`, que por estándar nunca resuelve.
+
+  **WhatsApp**: se guarda local y se manda a Woo como meta del cliente
+  (`_pos_whatsapp`), listo para la integración con WAHA. También es buscable desde el
+  buscador de clientes.
+
+  **Cómo funciona sin conexión**: si hay red, el cliente se crea en Woo de inmediato y se
+  guarda con su id real. Si no hay red, se guarda con un id LOCAL negativo marcado como
+  pendiente, para no bloquear la venta; el ciclo de sincronización lo crea en Woo después.
+  El id local nunca cambia, y el `customer_id` de Woo se resuelve **al momento de enviar
+  la orden**, no al guardarla — si se resolviera antes, una venta hecha offline apuntaría
+  a un cliente que todavía no existe allá.
+  Los clientes pendientes se suben ANTES que las órdenes en cada ciclo, por la misma razón.
+  Si Woo rechaza el cliente (correo duplicado o inválido), la venta que lo referencia queda
+  en estado `error` con el motivo, visible en el panel de errores.
+
+  **No cubre**: editar clientes existentes, ni borrar de la caché local los que se
+  eliminaron en Woo (quedan hasta que alguien limpie la base a mano).
 - **Multi-pago / cambio** — el checkout asume pago simple en efectivo, sin cálculo de
   cambio ni pagos mixtos.
 - **Reintentos con backoff** — `flushPendingOrders` reintenta en cada tick del intervalo,
