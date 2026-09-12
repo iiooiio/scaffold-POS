@@ -305,6 +305,39 @@ el selector busca "Fatal Errors". El stack trace dirá exactamente qué archivo 
 tronaron. Si el error NO menciona order attribution, hay otra causa y conviene revisarla
 con ese log en mano.
 
+## Descuentos
+
+Dos niveles, combinables:
+
+- **Por línea** — botón `%` en cada renglón del carrito.
+- **Por ticket** — botón "Descuento del ticket" en el panel del carrito.
+
+Cada uno acepta porcentaje o monto fijo. El descuento nunca puede dejar un importe
+negativo: si excede la base, se topa en cero.
+
+**Orden de aplicación**: primero el descuento de línea; después el del ticket sobre lo
+que queda, repartido proporcionalmente entre las líneas. La última línea absorbe el
+redondeo, de modo que la suma de las líneas siempre cuadra EXACTO con el total cobrado
+(probado con importes que no dividen parejo, ej. 10% sobre 33.33 + 33.33 + 33.34).
+
+**Un solo cálculo para todo**: `computeCart()` en `renderer.js` produce los números que
+ve el cajero, los que se imprimen y los que se mandan a WooCommerce. Si hubiera dos
+fórmulas, tarde o temprano el ticket y la orden dirían cosas distintas.
+
+**Cómo se ve en WooCommerce**: se usa la semántica nativa de Woo — `subtotal` es antes de
+descuento y `total` después, y la diferencia entre ambos ES el descuento. No se inventa
+ningún mecanismo ni se usan cupones falsos.
+
+Los productos temporales van como `fee_lines`, que no tienen campo `subtotal`, así que
+para ellos el descuento ya viaja aplicado en el total.
+
+**Devoluciones**: `display_items` guarda el precio EFECTIVO por unidad (ya con descuento),
+así que una devolución parcial regresa lo que el cliente realmente pagó, no el precio de
+lista.
+
+**No cubre**: cupones de WooCommerce (`coupon_lines`), ni descuentos automáticos por
+reglas (3x2, por categoría, por cliente).
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
