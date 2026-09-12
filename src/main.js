@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -7,7 +7,8 @@ const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
-const { printTicket } = require('./print/printer');
+const { printTicket, printCashReport } = require('./print/printer');
+const cash = require('./cash/cash-session');
 
 let mainWindow;
 let logoLocalPath = null;
@@ -30,9 +31,14 @@ async function downloadLogoIfConfigured() {
 }
 
 function createWindow() {
+  // Quita la barra de menú (File, Edit, View...) por completo en toda la app.
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 750,
+    fullscreen: true,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -125,8 +131,16 @@ ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers
 ipcMain.handle('customers:sync-now', async () => syncCustomers());
 
 ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId }) => {
+  // El corte de caja solo sirve si TODA venta queda ligada a un turno. Sin sesión
+  // abierta no se cobra -- si no, el efectivo del cajón nunca cuadraría.
+  const session = cash.getOpenSession();
+  if (!session) throw new Error('No hay caja abierta. Abre la caja antes de cobrar.');
+
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const { localTicket } = queueOrder({ cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId });
+  const { localTicket } = queueOrder({
+    cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId,
+    cashSessionId: session.id,
+  });
 
   // Se imprime de inmediato, sin esperar a que sincronice con WooCommerce.
   try {
@@ -137,6 +151,29 @@ ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo
   }
 
   return { localTicket, total, printed: true };
+});
+
+// ---- Control de efectivo ----
+ipcMain.handle('cash:current', () => cash.getCurrentSummary());
+ipcMain.handle('cash:open', (_e, openingFloat) => cash.openSession(openingFloat));
+ipcMain.handle('cash:add-movement', (_e, movement) => cash.addMovement(movement));
+ipcMain.handle('cash:movements', () => {
+  const session = cash.getOpenSession();
+  return session ? cash.getMovements(session.id) : [];
+});
+ipcMain.handle('cash:close', async (_e, countedAmount) => {
+  const summary = cash.closeSession(countedAmount);
+  try {
+    await printCashReport(summary);
+    return { ...summary, printed: true };
+  } catch (err) {
+    // El corte YA quedó guardado aunque falle la impresión.
+    return { ...summary, printed: false, printError: err.message };
+  }
+});
+
+ipcMain.handle('app:toggle-fullscreen', () => {
+  if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
 });
 
 ipcMain.handle('queue:sync-now', async () => flushPendingOrders());
