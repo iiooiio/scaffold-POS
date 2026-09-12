@@ -5,7 +5,7 @@ const { pathToFileURL } = require('url');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
-const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders } = require('./sync/order-sync');
+const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers } = require('./sync/customer-sync');
 const { printTicket, printCashReport } = require('./print/printer');
 const cash = require('./cash/cash-session');
@@ -181,3 +181,13 @@ ipcMain.handle('queue:summary', async () => getQueueSummary());
 ipcMain.handle('queue:errors', async () => getErroredOrders());
 ipcMain.handle('queue:retry-order', async (_e, orderId) => retryOrder(orderId));
 ipcMain.handle('queue:resolve-manually', async (_e, { orderId, note }) => resolveManually(orderId, note));
+
+ipcMain.handle('order:recent', () => getRecentOrders());
+ipcMain.handle('order:reprint', async (_e, orderId) => {
+  const data = getOrderForReprint(orderId);
+  if (data.cartItems.length === 0) {
+    throw new Error('Esta venta no tiene el detalle guardado (es anterior a esta función)');
+  }
+  await printTicket({ ...data, isReprint: true });
+  return { ok: true, localTicket: data.localTicket };
+});
