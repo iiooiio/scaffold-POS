@@ -911,6 +911,11 @@
         <span class="rail-value" id="lastTicket">—</span>
       </div>
 
+      <div class="rail-section" id="priceAdjNotice" style="display:none;">
+        <span class="rail-label">Ajuste de precios</span>
+        <span class="rail-value" id="priceAdjValue"></span>
+      </div>
+
       <div class="rail-section">
         <span class="rail-label">Catálogo</span>
         <span class="rail-value" id="catalogSyncedAt">sin sincronizar</span>
@@ -1037,6 +1042,10 @@
 
       <label class="set-label">Impresora (interface)</label>
       <input id="setPrinter" type="text" placeholder="printer:auto" />
+
+      <label class="set-label">Ajuste de precios (%)</label>
+      <input id="setPriceAdj" type="number" step="0.01" placeholder="0" />
+      <div class="subtitle" style="margin-top:-6px;">Positivo sube los precios, negativo los baja. 0 = precios tal cual de WooCommerce.</div>
 
       <label class="set-label">URL del logo (opcional)</label>
       <input id="setLogo" type="text" placeholder="https://tu-sitio.com/wp-content/..." />
