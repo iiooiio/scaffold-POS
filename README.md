@@ -237,8 +237,9 @@ real que el total de la orden en Woo coincida con el ticket impreso.
   lo soporta en este endpoint) en un intervalo aparte y más espaciado
   (`CUSTOMERS_SYNC_INTERVAL_MS`, default 10 min), y selector con búsqueda en el carrito.
   La orden manda `customer_id` a Woo cuando hay cliente seleccionado.
-  Desde el buscador de clientes hay un botón **+ Cliente nuevo**. Solo se pide nombre;
-  teléfono y WhatsApp son opcionales.
+  Desde el buscador de clientes hay un botón **+ Cliente nuevo**. Solo se pide nombre; el
+  WhatsApp es opcional. No se captura teléfono aparte: el WhatsApp se manda también como
+  teléfono de facturación en Woo, para que el cliente no quede allá sin número de contacto.
 
   **Correo generado automáticamente**: WooCommerce exige un email único por cliente, pero
   en mostrador nadie lo pide, así que se genera desde el nombre
@@ -250,9 +251,16 @@ real que el total de la orden en Woo coincida con el ticket impreso.
   en WooCommerce, esos mensajes saldrían hacia un dominio ajeno. Lo más seguro es usar un
   subdominio propio (`pos.tu-sitio.com`) o `pos.invalid`, que por estándar nunca resuelve.
 
-  **WhatsApp**: se guarda local y se manda a Woo como meta del cliente
-  (`_pos_whatsapp`), listo para la integración con WAHA. También es buscable desde el
-  buscador de clientes.
+  **WhatsApp**: se guarda local, se manda a Woo como meta del cliente (`_pos_whatsapp`)
+  —listo para la integración con WAHA— y además como `billing.phone`. También es buscable
+  desde el buscador de clientes.
+
+## Atajos de teclado
+
+- **Esc** — cierra el modal abierto. Si hay varios encimados, cierra solo el de arriba.
+- **F11** — entra/sale de pantalla completa (no hay barra de menú que lo ofrezca).
+- Cualquier código escaneado con lector se procesa sin necesidad de enfocar el buscador,
+  siempre que no haya un modal abierto.
 
   **Cómo funciona sin conexión**: si hay red, el cliente se crea en Woo de inmediato y se
   guarda con su id real. Si no hay red, se guarda con un id LOCAL negativo marcado como
