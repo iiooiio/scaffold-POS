@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations } = require('./sync/catalog-sync');
@@ -39,6 +40,16 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // En desarrollo (npm start) abre DevTools automáticamente: sin esto, un error del
+  // renderer falla en silencio y la UI simplemente no hace nada.
+  if (!app.isPackaged) mainWindow.webContents.openDevTools();
+}
+
+// Convierte una ruta local a file:// para que el renderer pueda mostrarla.
+// Vive aquí y no en el preload porque el preload corre sandboxed (ver preload.js).
+function toFileUrl(localPath) {
+  return localPath ? pathToFileURL(localPath).href : null;
 }
 
 // Si ya se descargó en una corrida anterior, usarlo de inmediato (offline-friendly).
@@ -104,10 +115,12 @@ app.on('window-all-closed', () => {
 // ---- IPC: puente entre la UI (renderer) y la lógica de negocio ----
 
 ipcMain.handle('app:register-id', () => config.registerId);
-ipcMain.handle('app:logo-path', () => logoLocalPath);
+ipcMain.handle('app:logo-url', () => toFileUrl(logoLocalPath));
 ipcMain.handle('catalog:sync-now', async () => syncCatalog());
-ipcMain.handle('catalog:get-products', async (_e, { search } = {}) => getLocalProducts({ search }));
-ipcMain.handle('catalog:get-variations', async (_e, productId) => getLocalVariations(productId));
+ipcMain.handle('catalog:get-products', async (_e, { search } = {}) =>
+  getLocalProducts({ search }).map((p) => ({ ...p, image_url: toFileUrl(p.image_local_path) })));
+ipcMain.handle('catalog:get-variations', async (_e, productId) =>
+  getLocalVariations(productId).map((v) => ({ ...v, image_url: toFileUrl(v.image_local_path) })));
 ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers({ search }));
 ipcMain.handle('customers:sync-now', async () => syncCustomers());
 
