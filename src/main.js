@@ -6,9 +6,9 @@ const { autoUpdater } = require('electron-updater');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
-const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations } = require('./sync/order-sync');
+const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations, refundOrderItems, getOrderRefundState, flushPendingRefunds } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers, createLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
-const { printTicket, printCashReport, printCancellation } = require('./print/printer');
+const { printTicket, printCashReport, printCancellation, printPartialRefund } = require('./print/printer');
 const cash = require('./cash/cash-session');
 
 let mainWindow;
@@ -123,6 +123,11 @@ app.whenReady().then(async () => {
       await flushPendingCancellations();
     } catch (err) {
       console.error('[sync cancelaciones] fallo:', err.message);
+    }
+    try {
+      await flushPendingRefunds();
+    } catch (err) {
+      console.error('[sync devoluciones] fallo:', err.message);
     }
   }, config.syncIntervalMs);
 
@@ -245,6 +250,49 @@ ipcMain.handle('queue:retry-order', async (_e, orderId) => retryOrder(orderId));
 ipcMain.handle('queue:resolve-manually', async (_e, { orderId, note }) => resolveManually(orderId, note));
 
 ipcMain.handle('order:recent', () => getRecentOrders());
+
+ipcMain.handle('order:refund-state', (_e, orderId) => getOrderRefundState(orderId));
+
+ipcMain.handle('order:refund', async (_e, { orderId, items, reason }) => {
+  // Misma restricción que la cancelación total: solo del turno abierto, para no alterar
+  // un corte ya cerrado.
+  const session = cash.getOpenSession();
+  if (!session) throw new Error('No hay caja abierta');
+
+  const order = getRecentOrders(200).find((o) => o.id === orderId);
+  if (!order) throw new Error('Venta no encontrada');
+  if (!order.cash_session_id) {
+    throw new Error('Esta venta es anterior al control de efectivo y no tiene turno asignado, así que no se puede devolver sin descuadrar el corte. Registra un retiro en el panel de Caja.');
+  }
+  if (order.cash_session_id !== session.id) {
+    throw new Error('Solo se pueden devolver ventas del turno actual. Para ventas de turnos anteriores, registra un retiro en el panel de Caja.');
+  }
+
+  const result = refundOrderItems(orderId, items, reason);
+
+  try {
+    if (result.fullCancellation) {
+      await printCancellation({
+        localTicket: result.local_ticket,
+        total: result.amount,
+        reason,
+        paymentMethod: result.payment_method,
+      });
+    } else {
+      await printPartialRefund({
+        localTicket: result.local_ticket,
+        items: result.items,
+        amount: result.amount,
+        reason,
+        paymentMethod: result.payment_method,
+      });
+    }
+    return { ...result, printed: true };
+  } catch (err) {
+    // La devolución ya quedó registrada aunque falle la impresión.
+    return { ...result, printed: false, printError: err.message };
+  }
+});
 
 ipcMain.handle('order:cancel', async (_e, { orderId, reason }) => {
   // Solo se cancelan ventas del turno ABIERTO. Cancelar una de un turno ya cerrado
