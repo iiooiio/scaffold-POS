@@ -6,7 +6,7 @@ const config = require('../config');
 // cashInfo: { received, change } -- solo relevante si paymentMethod === 'cash'
 // Construye el payload en formato WooCommerce y lo guarda en la cola local.
 // Devuelve el ticket local de inmediato (no espera red) para poder imprimir ya.
-function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo, customerId }) {
+function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo, customerId, cashSessionId = null }) {
   const db = getDb();
   const localTicket = nextLocalTicket(config.registerId);
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -46,14 +46,17 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
 
   db.prepare(`
     INSERT INTO orders_queue
-      (local_ticket, register_id, payload_json, display_items_json, total, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+      (local_ticket, register_id, payload_json, display_items_json, total,
+       payment_method, cash_session_id, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `).run(
     localTicket,
     config.registerId,
     JSON.stringify(payload),
     JSON.stringify(displayItems),
     total,
+    paymentMethod,
+    cashSessionId,
     new Date().toISOString()
   );
 
