@@ -28,6 +28,15 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     metaData.push({ key: '_pos_cash_change', value: String(cashInfo.change) });
   }
 
+  // Los productos temporales no existen en el catálogo, así que no pueden ir como
+  // line_items (Woo exige product_id). Van como fee_lines, que aceptan nombre y monto
+  // libres. Funciona offline igual, porque no dependen de que exista nada en Woo.
+  //
+  // tax_status: 'none' a propósito -- así el monto cobrado es exactamente el del ticket.
+  // Si necesitas que Woo les calcule impuesto, cámbialo a 'taxable'.
+  const catalogItems = cartItems.filter((i) => !i.custom);
+  const customItems = cartItems.filter((i) => i.custom);
+
   const payload = {
     payment_method: paymentMethod,
     payment_method_title: paymentTitles[paymentMethod] || paymentMethod,
@@ -38,7 +47,7 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     // subtotal/total explícitos: sin esto WooCommerce recalcula con SU precio de
     // catálogo e ignoraría el ajuste porcentual, dejando el ticket impreso y la orden
     // en Woo con montos distintos.
-    line_items: cartItems.map((item) => {
+    line_items: catalogItems.map((item) => {
       const lineTotal = (item.price * item.quantity).toFixed(2);
       return {
         product_id: item.product_id,
@@ -48,6 +57,15 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
         total: lineTotal,
       };
     }),
+    // Solo se incluye si hay temporales: mandar un arreglo vacío no aporta nada y evita
+    // sorpresas con validaciones de Woo.
+    ...(customItems.length > 0 ? {
+      fee_lines: customItems.map((item) => ({
+        name: item.quantity > 1 ? `${item.name} (x${item.quantity})` : item.name,
+        total: (item.price * item.quantity).toFixed(2),
+        tax_status: 'none',
+      })),
+    } : {}),
   };
 
   const displayItems = cartItems.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price }));
