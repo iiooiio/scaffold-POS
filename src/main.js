@@ -203,7 +203,8 @@ ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo
   const session = cash.getOpenSession();
   if (!session) throw new Error('No hay caja abierta. Abre la caja antes de cobrar.');
 
-  const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  // line_total ya trae el descuento aplicado (lo calcula computeCart en el renderer).
+  const total = cartItems.reduce((sum, i) => sum + (i.line_total ?? i.price * i.quantity), 0);
   const { localTicket } = queueOrder({
     cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId,
     cashSessionId: session.id,
