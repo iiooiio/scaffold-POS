@@ -53,13 +53,17 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     // subtotal/total explícitos: sin esto WooCommerce recalcula con SU precio de
     // catálogo e ignoraría el ajuste porcentual, dejando el ticket impreso y la orden
     // en Woo con montos distintos.
+    // subtotal = antes de descuento, total = después. Es la semántica nativa de
+    // WooCommerce: la diferencia entre ambos ES el descuento, y así se ve correcto en
+    // el detalle de la orden sin tener que inventar nada.
     line_items: catalogItems.map((item) => {
-      const lineTotal = (item.price * item.quantity).toFixed(2);
+      const subtotal = (item.line_subtotal ?? item.price * item.quantity).toFixed(2);
+      const lineTotal = (item.line_total ?? item.price * item.quantity).toFixed(2);
       return {
         product_id: item.product_id,
         ...(item.variation_id ? { variation_id: item.variation_id } : {}),
         quantity: item.quantity,
-        subtotal: lineTotal,
+        subtotal,
         total: lineTotal,
       };
     }),
@@ -68,7 +72,8 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     ...(customItems.length > 0 ? {
       fee_lines: customItems.map((item) => ({
         name: item.quantity > 1 ? `${item.name} (x${item.quantity})` : item.name,
-        total: (item.price * item.quantity).toFixed(2),
+        // Los fee_lines no tienen subtotal, así que el descuento ya viene aplicado.
+        total: (item.line_total ?? item.price * item.quantity).toFixed(2),
         tax_status: 'none',
       })),
     } : {}),
@@ -80,7 +85,11 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   const displayItems = cartItems.map((i) => ({
     name: i.name,
     quantity: i.quantity,
+    // price es el EFECTIVO (ya con descuento): es el que usan las devoluciones para
+    // calcular cuánto dinero regresar.
     price: i.price,
+    list_price: i.list_price ?? i.price,
+    discount_amount: i.discount_amount ?? 0,
     product_id: i.custom ? null : i.product_id,
     variation_id: i.variation_id || null,
     custom: Boolean(i.custom),
