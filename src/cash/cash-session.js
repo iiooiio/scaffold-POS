@@ -55,14 +55,22 @@ function getSessionSummary(sessionId) {
   // en el cajón. Se excluyen en cualquier etapa de la cancelación (local o ya en Woo).
   const notCancelled = `status NOT IN ('cancelled_local', 'cancel_pending', 'cancelled')`;
 
+  // NETO de devoluciones parciales: si se devolvieron $200 de una venta de $500, en el
+  // cajón quedan $300. Restarlo aquí es lo que hace que el corte cuadre.
   const cashSales = db.prepare(`
-    SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
+    SELECT COALESCE(SUM(total - COALESCE(refunded_total, 0)), 0) AS total, COUNT(*) AS count
+    FROM orders_queue
+    WHERE cash_session_id = ? AND payment_method = 'cash' AND ${notCancelled}
+  `).get(sessionId);
+
+  const cashRefunds = db.prepare(`
+    SELECT COALESCE(SUM(refunded_total), 0) AS total
     FROM orders_queue
     WHERE cash_session_id = ? AND payment_method = 'cash' AND ${notCancelled}
   `).get(sessionId);
 
   const cardSales = db.prepare(`
-    SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
+    SELECT COALESCE(SUM(total - COALESCE(refunded_total, 0)), 0) AS total, COUNT(*) AS count
     FROM orders_queue
     WHERE cash_session_id = ? AND payment_method = 'card' AND ${notCancelled}
   `).get(sessionId);
@@ -91,6 +99,7 @@ function getSessionSummary(sessionId) {
     cardSalesCount: cardSales.count,
     cancelledTotal: cancelled.total,
     cancelledCount: cancelled.count,
+    partialRefundsTotal: cashRefunds.total,
     cashIn,
     cashOut,
     expected,
