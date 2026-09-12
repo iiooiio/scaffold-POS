@@ -37,5 +37,9 @@ contextBridge.exposeInMainWorld('pos', {
   cancelOrder: (orderId, reason) => ipcRenderer.invoke('order:cancel', { orderId, reason }),
   getRefundState: (orderId) => ipcRenderer.invoke('order:refund-state', orderId),
   refundOrder: (orderId, items, reason) => ipcRenderer.invoke('order:refund', { orderId, items, reason }),
+  getMaintenanceStats: () => ipcRenderer.invoke('maintenance:stats'),
+  backupNow: () => ipcRenderer.invoke('maintenance:backup-now'),
+  cleanupCache: () => ipcRenderer.invoke('maintenance:cleanup'),
+  openBackupsFolder: () => ipcRenderer.invoke('maintenance:open-backups'),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
