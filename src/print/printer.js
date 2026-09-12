@@ -16,7 +16,7 @@ function buildPrinter() {
   });
 }
 
-async function printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo, note }) {
+async function printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo, note, isReprint = false }) {
   const thermalPrinter = buildPrinter();
 
   const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
@@ -27,6 +27,14 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
   thermalPrinter.alignCenter();
   thermalPrinter.println('*** TICKET DE VENTA ***');
   thermalPrinter.println(localTicket);
+  // Una reimpresión NUNCA debe verse idéntica al original: si no se distingue, un mismo
+  // ticket puede pasar dos veces por caja o por contabilidad.
+  if (isReprint) {
+    thermalPrinter.bold(true);
+    thermalPrinter.println('--- REIMPRESION ---');
+    thermalPrinter.bold(false);
+    thermalPrinter.println(new Date().toLocaleString());
+  }
   thermalPrinter.drawLine();
 
   thermalPrinter.alignLeft();
