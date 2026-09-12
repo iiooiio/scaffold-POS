@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('pos', {
   getVariations: (productId) => ipcRenderer.invoke('catalog:get-variations', productId),
   getCustomers: (search) => ipcRenderer.invoke('customers:get', { search }),
   syncCustomersNow: () => ipcRenderer.invoke('customers:sync-now'),
+  createCustomer: (data) => ipcRenderer.invoke('customers:create', data),
   checkout: (cartItems, paymentMethod, cashInfo, note, customerId) =>
     ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo, note, customerId }),
   syncQueueNow: () => ipcRenderer.invoke('queue:sync-now'),
