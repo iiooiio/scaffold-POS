@@ -1035,6 +1035,57 @@
   #discountSummary.show { display: flex; }
   #btnTicketDiscount.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
+  #btnMaintenance {
+    background: transparent;
+    border: 1px solid #3A423E;
+    color: var(--rail-text);
+    padding: 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #btnMaintenance:hover { background: #2A302C; }
+
+  #maintenanceOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(27, 27, 24, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+  }
+  #maintenanceOverlay.show { display: flex; }
+  #maintenancePanel {
+    background: var(--surface);
+    border-radius: 10px;
+    width: 460px;
+    max-height: 82vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  #maintenancePanel h2 { font-size: 16px; margin: 0 0 4px; }
+  #maintenancePanel .subtitle { font-size: 12px; color: var(--ink-soft); margin-bottom: 14px; }
+  .backup-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--ink-soft);
+    padding: 4px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  #btnCloseMaintenance {
+    margin-top: 12px;
+    align-self: flex-end;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-size: 13px;
+  }
+
   #settingsOverlay {
     position: fixed;
     inset: 0;
@@ -1134,6 +1185,7 @@
       <button id="btnSales">Ventas</button>
       <button id="btnCash">Caja</button>
       <button id="btnErrors">⚠ <span id="errorCount">0</span> con error</button>
+      <button id="btnMaintenance">Mantenimiento</button>
       <button id="btnSettings">Ajustes</button>
       <button id="btnSyncCatalog">Sincronizar catálogo</button>
     </div>
@@ -1303,6 +1355,15 @@
       <button id="btnApplyDiscount" class="cash-action-btn">Aplicar</button>
       <button id="btnRemoveDiscount" class="cash-action-btn secondary">Quitar descuento</button>
       <button id="btnCloseDiscount">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="maintenanceOverlay">
+    <div id="maintenancePanel">
+      <h2>Mantenimiento</h2>
+      <div class="subtitle">Respaldo de la base local y limpieza de caché.</div>
+      <div id="maintenanceBody"></div>
+      <button id="btnCloseMaintenance">Cerrar</button>
     </div>
   </div>
 
