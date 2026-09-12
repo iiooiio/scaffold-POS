@@ -335,6 +335,7 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
     selectedCustomer = null;
     updateCustomerButton();
     renderCart();
+    refreshCashState();
   } catch (err) {
     showToast(`Error al cobrar: ${err.message}`, true);
   }
@@ -549,6 +550,139 @@ document.getElementById('btnCloseCustomers').addEventListener('click', () => {
 });
 document.getElementById('customerSearch').addEventListener('input', (e) => renderCustomerList(e.target.value));
 
+// ---------- Control de efectivo ----------
+
+let cashSession = null;
+
+async function refreshCashState() {
+  cashSession = await window.pos.getCashSession();
+  const btn = document.getElementById('btnCash');
+  if (cashSession) {
+    btn.textContent = `Caja abierta · ${money(cashSession.expected)}`;
+    btn.classList.remove('closed');
+  } else {
+    btn.textContent = 'Caja cerrada — abrir';
+    btn.classList.add('closed');
+  }
+}
+
+async function renderCashPanel() {
+  const body = document.getElementById('cashBody');
+  await refreshCashState();
+
+  if (!cashSession) {
+    body.innerHTML = `
+      <div class="cash-section-title">Fondo inicial en el cajón</div>
+      <input id="openingFloat" type="number" step="0.01" min="0" placeholder="0.00" />
+      <button class="cash-action-btn" id="btnOpenCash">Abrir caja</button>
+    `;
+    document.getElementById('btnOpenCash').onclick = async () => {
+      const amount = parseFloat(document.getElementById('openingFloat').value) || 0;
+      try {
+        await window.pos.openCashSession(amount);
+        showToast('Caja abierta.');
+        renderCashPanel();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    };
+    return;
+  }
+
+  const s = cashSession;
+  const movements = await window.pos.getCashMovements();
+
+  body.innerHTML = `
+    <div class="cash-line"><span class="muted">Abierta desde</span><span>${new Date(s.opened_at).toLocaleString()}</span></div>
+    <div class="cash-line"><span class="muted">Fondo inicial</span><span>${money(s.opening_float)}</span></div>
+    <div class="cash-line"><span class="muted">Ventas en efectivo (${s.cashSalesCount})</span><span>${money(s.cashSalesTotal)}</span></div>
+    <div class="cash-line"><span class="muted">Ingresos</span><span>${money(s.cashIn)}</span></div>
+    <div class="cash-line"><span class="muted">Retiros</span><span>−${money(s.cashOut)}</span></div>
+    <div class="cash-line total"><span>Esperado en cajón</span><span>${money(s.expected)}</span></div>
+    <div class="cash-line"><span class="muted">Ventas con tarjeta (${s.cardSalesCount})</span><span class="muted">${money(s.cardSalesTotal)} · no afecta cajón</span></div>
+
+    <div class="cash-section-title">Registrar movimiento</div>
+    <input id="movAmount" type="number" step="0.01" min="0" placeholder="Monto" />
+    <input id="movReason" type="text" placeholder="Motivo (ej. pago a proveedor)" />
+    <div class="cash-row-2">
+      <button class="cash-action-btn secondary" id="btnMovIn">+ Ingreso</button>
+      <button class="cash-action-btn secondary" id="btnMovOut">− Retiro</button>
+    </div>
+
+    ${movements.length > 0 ? `
+      <div class="cash-section-title">Movimientos del turno</div>
+      ${movements.map((m) => `
+        <div class="cash-line">
+          <span class="muted">${m.type === 'in' ? '+' : '−'} ${m.reason || '(sin motivo)'}</span>
+          <span>${money(m.amount)}</span>
+        </div>
+      `).join('')}
+    ` : ''}
+
+    <div class="cash-section-title">Cerrar turno (corte)</div>
+    <input id="countedAmount" type="number" step="0.01" min="0" placeholder="Efectivo contado en el cajón" />
+    <button class="cash-action-btn danger" id="btnCloseSession">Hacer corte e imprimir</button>
+  `;
+
+  const registerMovement = async (type) => {
+    const amount = parseFloat(document.getElementById('movAmount').value);
+    const reason = document.getElementById('movReason').value.trim();
+    try {
+      await window.pos.addCashMovement({ type, amount, reason });
+      showToast(type === 'in' ? 'Ingreso registrado.' : 'Retiro registrado.');
+      renderCashPanel();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  };
+  document.getElementById('btnMovIn').onclick = () => registerMovement('in');
+  document.getElementById('btnMovOut').onclick = () => registerMovement('out');
+
+  document.getElementById('btnCloseSession').onclick = async () => {
+    const countedInput = document.getElementById('countedAmount');
+    if (countedInput.value === '') {
+      showToast('Captura el efectivo contado antes de cerrar.', true);
+      return;
+    }
+    const counted = parseFloat(countedInput.value) || 0;
+    const diff = counted - s.expected;
+    const diffMsg = diff === 0
+      ? 'Cuadra exacto.'
+      : diff > 0 ? `Sobrante de ${money(diff)}.` : `Faltante de ${money(Math.abs(diff))}.`;
+
+    if (!confirm(`${diffMsg}\n\n¿Cerrar el turno? Esto no se puede deshacer.`)) return;
+
+    try {
+      const result = await window.pos.closeCashSession(counted);
+      showToast(
+        result.printed
+          ? `Corte cerrado. ${diffMsg}`
+          : `Corte cerrado (${diffMsg}) pero falló la impresión: ${result.printError}`,
+        !result.printed
+      );
+      renderCashPanel();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  };
+}
+
+document.getElementById('btnCash').addEventListener('click', () => {
+  document.getElementById('cashOverlay').classList.add('show');
+  renderCashPanel();
+});
+document.getElementById('btnCloseCash').addEventListener('click', () => {
+  document.getElementById('cashOverlay').classList.remove('show');
+});
+
+// F11 para salir/entrar de pantalla completa (no hay menú que lo ofrezca).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F11') {
+    e.preventDefault();
+    window.pos.toggleFullscreen();
+  }
+});
+
 // ---------- Arranque ----------
 
 (async function init() {
@@ -580,5 +714,6 @@ document.getElementById('customerSearch').addEventListener('input', (e) => rende
   loadProducts();
   renderCart();
   refreshErrorBadge();
-  setInterval(refreshErrorBadge, 15000);
+  refreshCashState();
+  setInterval(() => { refreshErrorBadge(); refreshCashState(); }, 15000);
 })();
