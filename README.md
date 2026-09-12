@@ -187,6 +187,30 @@ Se imprime un comprobante de cancelación con monto devuelto, motivo y espacio d
 **No cubre**: cancelaciones parciales (devolver solo algunos artículos de un ticket).
 Es todo o nada.
 
+## Ajuste global de precios (%)
+
+En **Ajustes** hay un campo de porcentaje que modifica todos los precios que vienen de
+WooCommerce. Positivo sube (ej. `10` = +10%), negativo baja (ej. `-5` = -5%), `0` deja
+los precios tal cual.
+
+Se aplica en un solo punto del código (`adjustPrice` en `main.js`), así que catálogo,
+selector de variaciones, escaneo de código de barras y carrito siempre usan el mismo
+precio — no hay forma de que el ticket y la orden difieran por este motivo.
+
+**Importante**: al enviar la orden se mandan `subtotal` y `total` explícitos por línea.
+Sin eso WooCommerce recalcularía con SU precio de catálogo e ignoraría el ajuste, dejando
+el ticket impreso y la orden en Woo con montos distintos.
+
+Cuando el ajuste está activo, el riel izquierdo muestra un aviso permanente con el
+porcentaje. Es a propósito: un recargo o descuento global invisible es una forma fácil de
+cobrar mal sin que nadie se dé cuenta.
+
+El cambio de porcentaje aplica al guardar (recarga el catálogo), sin reiniciar.
+
+**Caveat sin verificar**: no probé cómo interactúa el ajuste con la configuración de
+impuestos de WooCommerce. Si manejas precios con IVA incluido, verifica con una venta
+real que el total de la orden en Woo coincida con el ticket impreso.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
