@@ -35,11 +35,19 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     customer_note: customerNote,
     ...(customerId ? { customer_id: customerId } : {}),
     meta_data: metaData,
-    line_items: cartItems.map((item) => ({
-      product_id: item.product_id,
-      ...(item.variation_id ? { variation_id: item.variation_id } : {}),
-      quantity: item.quantity,
-    })),
+    // subtotal/total explícitos: sin esto WooCommerce recalcula con SU precio de
+    // catálogo e ignoraría el ajuste porcentual, dejando el ticket impreso y la orden
+    // en Woo con montos distintos.
+    line_items: cartItems.map((item) => {
+      const lineTotal = (item.price * item.quantity).toFixed(2);
+      return {
+        product_id: item.product_id,
+        ...(item.variation_id ? { variation_id: item.variation_id } : {}),
+        quantity: item.quantity,
+        subtotal: lineTotal,
+        total: lineTotal,
+      };
+    }),
   };
 
   const displayItems = cartItems.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price }));
