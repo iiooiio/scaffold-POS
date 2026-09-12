@@ -695,6 +695,7 @@ async function renderCashPanel() {
     <div class="cash-line"><span class="muted">Retiros</span><span>−${money(s.cashOut)}</span></div>
     <div class="cash-line total"><span>Esperado en cajón</span><span>${money(s.expected)}</span></div>
     <div class="cash-line"><span class="muted">Ventas con tarjeta (${s.cardSalesCount})</span><span class="muted">${money(s.cardSalesTotal)} · no afecta cajón</span></div>
+    ${s.partialRefundsTotal > 0 ? `<div class="cash-line"><span class="muted">Devoluciones parciales</span><span class="muted">−${money(s.partialRefundsTotal)} · ya descontadas</span></div>` : ''}
     ${s.cancelledCount > 0 ? `<div class="cash-line"><span class="muted">Canceladas (${s.cancelledCount})</span><span class="muted">${money(s.cancelledTotal)} · ya descontadas</span></div>` : ''}
 
     <div class="cash-section-title">Registrar movimiento</div>
@@ -776,6 +777,7 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 // Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
 const OVERLAYS_TOP_FIRST = [
   'settingsOverlay',
+  'refundOverlay',
   'customOverlay',
   'cashOverlay',
   'salesOverlay',
@@ -848,6 +850,7 @@ async function renderSalesPanel() {
       </div>
       <span class="sr-total">${money(o.total)}</span>
       <button data-action="reprint">Reimprimir</button>
+      ${isCancelled ? '' : '<button data-action="refund">Devolver</button>'}
       ${isCancelled ? '' : '<button data-action="cancel" class="danger">Cancelar</button>'}
     `;
 
@@ -863,6 +866,9 @@ async function renderSalesPanel() {
       e.target.disabled = false;
       e.target.textContent = 'Reimprimir';
     };
+
+    const refundBtn = row.querySelector('[data-action="refund"]');
+    if (refundBtn) refundBtn.onclick = () => openRefundModal(o.id, o.local_ticket);
 
     const cancelBtn = row.querySelector('[data-action="cancel"]');
     if (cancelBtn) {
@@ -889,6 +895,120 @@ async function renderSalesPanel() {
     body.appendChild(row);
   }
 }
+
+// ---------- Devolución parcial ----------
+
+let refundState = null;      // estado de la venta que se está devolviendo
+let refundSelection = {};    // { [index]: cantidad seleccionada }
+
+async function openRefundModal(orderId, ticket) {
+  try {
+    refundState = await window.pos.getRefundState(orderId);
+  } catch (err) {
+    showToast(err.message, true);
+    return;
+  }
+
+  if (refundState.items.length === 0) {
+    showToast('Esta venta no tiene detalle guardado (es anterior a esta función).', true);
+    return;
+  }
+
+  refundSelection = {};
+  document.getElementById('refundTitle').textContent = `Devolver — ${ticket}`;
+  document.getElementById('refundReason').value = '';
+  document.getElementById('refundOverlay').classList.add('show');
+  renderRefundItems();
+}
+
+function refundTotal() {
+  return Object.entries(refundSelection).reduce((sum, [index, qty]) => {
+    const item = refundState.items[index];
+    return sum + (item ? item.price * qty : 0);
+  }, 0);
+}
+
+function renderRefundItems() {
+  const body = document.getElementById('refundItemsBody');
+  body.innerHTML = '';
+
+  for (const item of refundState.items) {
+    const selected = refundSelection[item.index] || 0;
+    const line = document.createElement('div');
+    line.className = `refund-line ${item.available === 0 ? 'depleted' : ''}`;
+    line.innerHTML = `
+      <div class="rl-info">
+        <div class="rl-name">${item.name}</div>
+        <div class="rl-meta">${money(item.price)} c/u · ${item.available} de ${item.quantity} disponibles${item.refunded > 0 ? ` · ${item.refunded} ya devuelto` : ''}</div>
+      </div>
+      <div class="rl-qty">
+        <button data-action="dec">−</button>
+        <span>${selected}</span>
+        <button data-action="inc">+</button>
+      </div>
+    `;
+    line.querySelector('[data-action="dec"]').onclick = () => {
+      refundSelection[item.index] = Math.max(0, selected - 1);
+      if (refundSelection[item.index] === 0) delete refundSelection[item.index];
+      renderRefundItems();
+    };
+    line.querySelector('[data-action="inc"]').onclick = () => {
+      // Tope en lo disponible: no se puede devolver más de lo que se vendió.
+      if (selected >= item.available) return;
+      refundSelection[item.index] = selected + 1;
+      renderRefundItems();
+    };
+    body.appendChild(line);
+  }
+
+  document.getElementById('refundAmount').textContent = money(refundTotal());
+}
+
+document.getElementById('btnCloseRefund').addEventListener('click', () => {
+  document.getElementById('refundOverlay').classList.remove('show');
+});
+
+document.getElementById('btnConfirmRefund').addEventListener('click', async (e) => {
+  const items = Object.entries(refundSelection)
+    .map(([index, quantity]) => ({ index: Number(index), quantity }))
+    .filter((i) => i.quantity > 0);
+
+  if (items.length === 0) {
+    showToast('No seleccionaste nada para devolver.', true);
+    return;
+  }
+
+  const amount = refundTotal();
+  const pending = refundState.total - refundState.refunded_total;
+  const isFull = amount >= pending;
+  const warning = isFull
+    ? 'Esto devuelve TODO lo que queda, así que la venta se cancelará completa.'
+    : `Se devolverán ${money(amount)}.`;
+
+  if (!confirm(`${warning}\n\n¿Continuar? No se puede deshacer.`)) return;
+
+  e.target.disabled = true;
+  e.target.textContent = 'Procesando...';
+
+  try {
+    const reason = document.getElementById('refundReason').value.trim();
+    const result = await window.pos.refundOrder(refundState.id, items, reason);
+    showToast(
+      result.printed
+        ? (result.fullCancellation ? 'Venta cancelada completa.' : `Devueltos ${money(result.amount)}.`)
+        : `Devolución registrada pero falló la impresión: ${result.printError}`,
+      !result.printed
+    );
+    document.getElementById('refundOverlay').classList.remove('show');
+    renderSalesPanel();
+    refreshCashState();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+
+  e.target.disabled = false;
+  e.target.textContent = 'Devolver e imprimir';
+});
 
 document.getElementById('btnSales').addEventListener('click', () => {
   document.getElementById('salesOverlay').classList.add('show');
@@ -1070,7 +1190,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show'
   );
   if (anyOverlayOpen) return;
 
