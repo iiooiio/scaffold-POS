@@ -7,6 +7,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 // se hace en main.js, que sí tiene Node completo.
 contextBridge.exposeInMainWorld('pos', {
   getRegisterId: () => ipcRenderer.invoke('app:register-id'),
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  getConfig: () => ipcRenderer.invoke('config:get'),
+  saveConfig: (values) => ipcRenderer.invoke('config:save', values),
+  findBySku: (sku) => ipcRenderer.invoke('catalog:find-by-sku', sku),
   getLogoUrl: () => ipcRenderer.invoke('app:logo-url'),
   syncCatalogNow: () => ipcRenderer.invoke('catalog:sync-now'),
   getProducts: (search) => ipcRenderer.invoke('catalog:get-products', { search }),
