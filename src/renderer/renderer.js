@@ -115,9 +115,8 @@ function renderProductGrid() {
     tile.className = `product-tile ${outOfStock ? 'no-stock' : ''}`;
     tile.disabled = outOfStock;
 
-    const imgSrc = p.image_local_path ? window.pos.toFileUrl(p.image_local_path) : null;
-    const imgHtml = imgSrc
-      ? `<img class="p-image" src="${imgSrc}" alt="" onerror="this.style.display='none'" />`
+    const imgHtml = p.image_url
+      ? `<img class="p-image" src="${p.image_url}" alt="" onerror="this.style.display='none'" />`
       : `<div class="p-image p-image-placeholder"></div>`;
 
     tile.innerHTML = `
@@ -553,13 +552,27 @@ document.getElementById('customerSearch').addEventListener('input', (e) => rende
 // ---------- Arranque ----------
 
 (async function init() {
-  document.getElementById('railRegisterName').textContent = await window.pos.getRegisterId();
+  // Si el preload falló, window.pos no existe y TODA la UI queda muerta sin señal.
+  // Mejor decirlo en pantalla que dejar la app en silencio.
+  if (!window.pos) {
+    document.getElementById('connLabel').textContent = 'Error: preload no cargó';
+    document.getElementById('connDot').className = 'dot offline';
+    return;
+  }
 
-  const logoPath = await window.pos.getLogoPath();
-  if (logoPath) {
-    const img = document.getElementById('railLogo');
-    img.src = window.pos.toFileUrl(logoPath);
-    img.style.display = 'block';
+  try {
+    document.getElementById('railRegisterName').textContent = await window.pos.getRegisterId();
+
+    const logoUrl = await window.pos.getLogoUrl();
+    if (logoUrl) {
+      const img = document.getElementById('railLogo');
+      img.src = logoUrl;
+      img.style.display = 'block';
+    }
+  } catch (err) {
+    // No abortamos: el catálogo y el carrito deben funcionar aunque el logo o el
+    // register id fallen.
+    console.error('[init] fallo parcial:', err);
   }
 
   updateConnDot();
