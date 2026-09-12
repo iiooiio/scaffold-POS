@@ -35,5 +35,7 @@ contextBridge.exposeInMainWorld('pos', {
   getRecentOrders: () => ipcRenderer.invoke('order:recent'),
   reprintOrder: (orderId) => ipcRenderer.invoke('order:reprint', orderId),
   cancelOrder: (orderId, reason) => ipcRenderer.invoke('order:cancel', { orderId, reason }),
+  getRefundState: (orderId) => ipcRenderer.invoke('order:refund-state', orderId),
+  refundOrder: (orderId, items, reason) => ipcRenderer.invoke('order:refund', { orderId, items, reason }),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
