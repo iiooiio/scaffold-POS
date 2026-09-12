@@ -44,6 +44,7 @@ function getDb() {
       cash_session_id INTEGER,         -- sesión de caja a la que pertenece la venta
       cancelled_at TEXT,
       cancel_reason TEXT,
+      refunded_total REAL NOT NULL DEFAULT 0,  -- dinero ya devuelto (parcial o total)
       customer_ref INTEGER,            -- customers.id local; el customer_id de Woo se resuelve al enviar
       -- pending | synced | error | resolved_manually
       -- cancelled_local  : cancelada sin haber llegado nunca a WooCommerce
@@ -108,6 +109,22 @@ function getDb() {
       created_at TEXT NOT NULL
     );
 
+    -- Devoluciones parciales pendientes de enviar a WooCommerce. Se encolan aparte
+    -- porque en Woo una devolución parcial NO es cambiar el estado de la orden: es
+    -- crear un refund sobre una orden que ya existe allá.
+    CREATE TABLE IF NOT EXISTS refunds_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_local_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      items_json TEXT,                 -- [{product_id, variation_id, quantity, amount}]
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | done | error
+      wc_refund_id INTEGER,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      synced_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS counters (
       name TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
@@ -135,6 +152,15 @@ function getDb() {
   }
   if (!existingCols.includes('cancel_reason')) {
     db.exec(`ALTER TABLE orders_queue ADD COLUMN cancel_reason TEXT`);
+  }
+  if (!existingCols.includes('refunded_total')) {
+    db.exec(`ALTER TABLE orders_queue ADD COLUMN refunded_total REAL NOT NULL DEFAULT 0`);
+    // Una venta ya cancelada equivale a devolución del 100%: así el corte la trata
+    // igual que a una parcial y no hay dos caminos de cálculo distintos.
+    db.exec(`
+      UPDATE orders_queue SET refunded_total = COALESCE(total, 0)
+      WHERE status IN ('cancelled_local', 'cancel_pending', 'cancelled')
+    `);
   }
 
   const customerCols = db.prepare(`PRAGMA table_info(customers)`).all().map((c) => c.name);
