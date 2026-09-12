@@ -106,6 +106,64 @@ externo fijo, etc.) — pendiente de decidir según cómo lo vayas a distribuir.
 - Folio local por caja (`REGISTER_ID`) para no chocar números de ticket entre cajas
   mientras están offline.
 
+## Configuración: ya no necesitas copiar .env a cada caja
+
+La app ahora guarda su configuración en `config.json` dentro de la carpeta de datos de
+usuario de cada máquina, y se edita desde el botón **Ajustes** en la app. Flujo normal
+de instalación en una caja nueva:
+
+1. Instalas el `.exe`.
+2. Abres la app. Como no hay configuración, se abre sola la pantalla de Ajustes.
+3. Capturas URL del sitio, consumer key/secret, identificador de caja, impresora y
+   (opcional) URL del logo.
+4. Guardas y reinicias la app.
+
+El `.env` sigue funcionando para desarrollo (`npm start`) y tiene MENOR prioridad que
+`config.json`. Si faltan datos, la app ya NO se cae con un diálogo de error como antes:
+arranca igual y te pide la configuración.
+
+## Auto-update
+
+La app empaquetada busca actualizaciones al arrancar y cada 4 horas, usando releases de
+GitHub. Para publicar una versión nueva:
+
+1. Sube la versión en `package.json` (ej. `0.1.0` → `0.2.0`).
+2. Commit y push.
+3. `git tag v0.2.0 && git push origin v0.2.0`
+
+El workflow compila en Windows y publica el release automáticamente; las cajas
+instaladas la detectan y la instalan. Una corrida manual desde la pestaña Actions solo
+compila, sin publicar.
+
+**Ajusta `owner` y `repo`** en la sección `build.publish` de `package.json` si tu
+repositorio no es `iiooiio/scaffold-POS`.
+
+**Caveats sin verificar** (no pude probar el ciclo completo de actualización):
+- El instalador no está firmado digitalmente. Windows SmartScreen puede advertir al
+  instalar. El auto-update de NSIS funciona sin firma, pero no lo confirmé en máquina.
+- Si el repositorio es privado, el auto-update necesita un token para descargar los
+  releases; con repositorio público no hace falta.
+
+## Lector de código de barras
+
+Funciona con lectores USB que emulan teclado (la mayoría). No hay que configurar nada ni
+hacer click en el buscador: la app detecta el escaneo por la velocidad del tecleo
+(teclas a menos de 40ms una de otra, terminadas en Enter) y busca por **SKU exacto**.
+
+- Producto simple → se agrega al carrito directo.
+- Variación con SKU propio → se agrega esa variación.
+- SKU de un producto variable (el padre) → abre el selector de variación, porque no se
+  puede vender sin elegir una.
+- SKU desconocido → aviso en pantalla, no agrega nada.
+
+Requisito: los SKU en WooCommerce tienen que coincidir con lo que imprime el código de
+barras. Si usas los códigos de barras del fabricante (EAN/UPC), ponlos como SKU.
+
+**Caveat sin verificar**: el umbral de 40ms entre teclas está tomado del
+comportamiento típico de estos lectores, pero no lo probé con hardware. Si tu lector es
+más lento y los escaneos no se detectan, sube `SCAN_MAX_GAP_MS` en
+`src/renderer/renderer.js`.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
