@@ -69,7 +69,52 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
   await thermalPrinter.execute();
 }
 
-module.exports = { printTicket, printCashReport, printCancellation };
+module.exports = { printTicket, printCashReport, printCancellation, printPartialRefund };
+
+// Comprobante de devolución parcial: detalla qué piezas se devolvieron y por cuánto.
+async function printPartialRefund({ localTicket, items, amount, reason, paymentMethod }) {
+  const thermalPrinter = buildPrinter();
+
+  const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
+  if (!isConnected) {
+    throw new Error('Impresora no detectada (revisa cable USB / PRINTER_INTERFACE en .env)');
+  }
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.bold(true);
+  thermalPrinter.println('*** DEVOLUCION PARCIAL ***');
+  thermalPrinter.bold(false);
+  thermalPrinter.println(localTicket);
+  thermalPrinter.println(new Date().toLocaleString());
+  thermalPrinter.drawLine();
+
+  thermalPrinter.alignLeft();
+  for (const item of items) {
+    thermalPrinter.println(`${item.quantity}x ${item.name}`);
+    thermalPrinter.alignRight();
+    thermalPrinter.println(`$${item.amount.toFixed(2)}`);
+    thermalPrinter.alignLeft();
+  }
+
+  thermalPrinter.drawLine();
+  thermalPrinter.alignRight();
+  thermalPrinter.println(`DEVUELTO: $${amount.toFixed(2)}`);
+  thermalPrinter.println(`Pago original: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
+
+  if (reason && reason.trim()) {
+    thermalPrinter.alignLeft();
+    thermalPrinter.newLine();
+    thermalPrinter.println('Motivo:');
+    thermalPrinter.println(reason.trim());
+  }
+
+  thermalPrinter.alignCenter();
+  thermalPrinter.newLine();
+  thermalPrinter.println('Firma: ____________________');
+  thermalPrinter.cut();
+
+  await thermalPrinter.execute();
+}
 
 // Comprobante de cancelación: deja constancia física de que se devolvió el dinero.
 async function printCancellation({ localTicket, total, reason, paymentMethod }) {
