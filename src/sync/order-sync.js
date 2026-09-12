@@ -148,6 +148,46 @@ function getErroredOrders() {
   return rows.map((r) => ({ ...r, display_items: JSON.parse(r.display_items_json || '[]') }));
 }
 
+// Ventas recientes de ESTA caja, para reimprimir tickets. Incluye cualquier estado de
+// sincronización: el ticket existe aunque la orden no haya subido a WooCommerce.
+function getRecentOrders(limit = 50) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT id, local_ticket, total, payment_method, status, created_at
+    FROM orders_queue WHERE register_id = ?
+    ORDER BY id DESC LIMIT ?
+  `).all(config.registerId, limit);
+  return rows;
+}
+
+// Reconstruye los datos que printTicket necesita a partir de lo guardado en la cola.
+// Los items salen de display_items_json; la nota y el efectivo recibido/cambio viven
+// dentro de payload_json (customer_note y meta_data), no en columnas propias.
+function getOrderForReprint(orderId) {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM orders_queue WHERE id = ?`).get(orderId);
+  if (!row) throw new Error(`Venta ${orderId} no encontrada`);
+
+  const payload = JSON.parse(row.payload_json);
+  const meta = payload.meta_data || [];
+  const metaValue = (key) => meta.find((m) => m.key === key)?.value;
+
+  const received = metaValue('_pos_cash_received');
+  const change = metaValue('_pos_cash_change');
+
+  return {
+    localTicket: row.local_ticket,
+    // Órdenes viejas (anteriores a esta columna) pueden no tener items guardados.
+    cartItems: JSON.parse(row.display_items_json || '[]'),
+    total: row.total,
+    paymentMethod: row.payment_method || payload.payment_method,
+    cashInfo: received !== undefined
+      ? { received: parseFloat(received), change: parseFloat(change) }
+      : null,
+    note: payload.customer_note || '',
+  };
+}
+
 module.exports = {
   queueOrder,
   flushPendingOrders,
@@ -155,4 +195,6 @@ module.exports = {
   resolveManually,
   getQueueSummary,
   getErroredOrders,
+  getRecentOrders,
+  getOrderForReprint,
 };
