@@ -62,6 +62,16 @@ function getDb() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY,          -- id de WooCommerce
+      first_name TEXT,
+      last_name TEXT,
+      email TEXT,
+      phone TEXT,
+      raw_json TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS counters (
       name TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
