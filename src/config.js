@@ -55,6 +55,9 @@ function reload() {
   config.registerId = get('REGISTER_ID', 'CAJA1');
   config.logoUrl = get('LOGO_URL', null);
   config.printerInterface = get('PRINTER_INTERFACE', 'printer:auto');
+  // Ajuste global de precios en %, aplicado sobre el precio que viene de WooCommerce.
+  // Positivo = recargo (ej. 10 sube todo 10%), negativo = descuento (ej. -5 baja 5%).
+  config.priceAdjustmentPercent = parseFloat(get('PRICE_ADJUSTMENT_PERCENT', '0')) || 0;
   config.syncIntervalMs = parseInt(get('SYNC_INTERVAL_MS', '30000'), 10);
   config.customersSyncIntervalMs = parseInt(get('CUSTOMERS_SYNC_INTERVAL_MS', '600000'), 10);
   return config;
@@ -74,6 +77,7 @@ function getEditableConfig() {
     REGISTER_ID: config.registerId,
     LOGO_URL: config.logoUrl || '',
     PRINTER_INTERFACE: config.printerInterface,
+    PRICE_ADJUSTMENT_PERCENT: String(config.priceAdjustmentPercent),
   };
 }
 
