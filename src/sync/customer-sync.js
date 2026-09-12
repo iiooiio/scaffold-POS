@@ -96,6 +96,10 @@ async function createLocalCustomer({ first_name = '', last_name = '', phone = ''
   // Se acepta un email explícito por si algún día se quiere capturar, pero no se pide.
   const cleanEmail = (email || '').trim() || generateEmail(db, first_name, last_name);
 
+  // Ya no se captura teléfono aparte: el WhatsApp se usa también como teléfono de
+  // facturación, para que el cliente no quede en Woo sin ningún número de contacto.
+  const contactPhone = (phone || '').trim() || whatsapp.trim();
+
   if (db.prepare(`SELECT 1 FROM customers WHERE email = ?`).get(cleanEmail)) {
     throw new Error('Ya existe un cliente con ese correo');
   }
@@ -104,7 +108,7 @@ async function createLocalCustomer({ first_name = '', last_name = '', phone = ''
     email: cleanEmail,
     first_name,
     last_name,
-    billing: { first_name, last_name, email: cleanEmail, phone },
+    billing: { first_name, last_name, email: cleanEmail, phone: contactPhone },
     meta_data: whatsapp.trim() ? [{ key: '_pos_whatsapp', value: whatsapp.trim() }] : [],
   };
 
@@ -126,7 +130,7 @@ async function createLocalCustomer({ first_name = '', last_name = '', phone = ''
   db.prepare(`
     INSERT INTO customers (id, woo_id, pending_sync, first_name, last_name, email, phone, whatsapp, raw_json, updated_at)
     VALUES (?, NULL, 1, ?, ?, ?, ?, ?, ?, ?)
-  `).run(localId, first_name, last_name, cleanEmail, phone, whatsapp.trim() || null,
+  `).run(localId, first_name, last_name, cleanEmail, contactPhone || null, whatsapp.trim() || null,
          JSON.stringify(payload), new Date().toISOString());
 
   return { ...db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId), created_in_woo: false };
