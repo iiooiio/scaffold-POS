@@ -450,13 +450,18 @@ function updateChangeAndCheckoutState() {
   }
 
   const receivedInput = document.getElementById('cashReceived');
+  const typed = receivedInput.value.trim() !== '';
   const received = parseFloat(receivedInput.value) || 0;
   const change = received - total;
-  const insufficient = received < total;
 
-  document.getElementById('changeAmount').textContent = money(Math.max(change, 0));
+  // Campo vacío = el cliente paga exacto. Antes se trataba como "recibió $0", así que
+  // el botón de cobrar quedaba bloqueado hasta elegir una pill, aunque no hiciera falta
+  // capturar nada. Solo se bloquea si el cajero SÍ escribió un monto y no alcanza.
+  const insufficient = typed && received < total;
+
+  document.getElementById('changeAmount').textContent = typed ? money(Math.max(change, 0)) : '—';
   document.getElementById('changeRow').classList.toggle('insufficient', insufficient);
-  receivedInput.classList.toggle('insufficient', insufficient && receivedInput.value !== '');
+  receivedInput.classList.toggle('insufficient', insufficient);
 
   renderCashPills(total, received);
 
@@ -501,8 +506,13 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   btn.textContent = 'Procesando...';
 
   const total = getTotal();
-  const received = paymentMethod === 'cash' ? parseFloat(document.getElementById('cashReceived').value) || 0 : total;
-  const change = paymentMethod === 'cash' ? received - total : 0;
+  // Sin monto capturado se asume pago exacto; si no, el ticket imprimiría "Recibido
+  // $0.00" y un cambio negativo.
+  const typedReceived = document.getElementById('cashReceived').value.trim();
+  const received = paymentMethod === 'cash' && typedReceived !== ''
+    ? parseFloat(typedReceived) || 0
+    : total;
+  const change = paymentMethod === 'cash' ? round2(received - total) : 0;
   const noteChecked = document.getElementById('noteCheckbox').checked;
   const note = noteChecked ? document.getElementById('noteText').value.trim() : '';
 
@@ -815,7 +825,7 @@ async function refreshCashState() {
   cashSession = await window.pos.getCashSession();
   const btn = document.getElementById('btnCash');
   if (cashSession) {
-    btn.textContent = `Caja abierta · ${money(cashSession.expected)}`;
+    btn.textContent = 'Caja abierta';
     btn.classList.remove('closed');
   } else {
     btn.textContent = 'Caja cerrada — abrir';
