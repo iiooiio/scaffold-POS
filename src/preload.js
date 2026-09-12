@@ -32,5 +32,6 @@ contextBridge.exposeInMainWorld('pos', {
   closeCashSession: (countedAmount) => ipcRenderer.invoke('cash:close', countedAmount),
   getRecentOrders: () => ipcRenderer.invoke('order:recent'),
   reprintOrder: (orderId) => ipcRenderer.invoke('order:reprint', orderId),
+  cancelOrder: (orderId, reason) => ipcRenderer.invoke('order:cancel', { orderId, reason }),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
