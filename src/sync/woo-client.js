@@ -119,6 +119,10 @@ async function cancelWooOrder(wcOrderId) {
   return wcPut(`/orders/${wcOrderId}`, { status: 'cancelled' });
 }
 
+async function createCustomer(customerPayload) {
+  return wcPost('/customers', customerPayload);
+}
+
 async function createOrder(orderPayload) {
   return wcPost('/orders', orderPayload);
 }
@@ -134,4 +138,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createOrder, cancelWooOrder, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, isOnline };
