@@ -1,18 +1,89 @@
 const { getDb, nextLocalTicket } = require('../db/init');
 const { createOrder, cancelWooOrder, getOrder, createRefund, isOnline } = require('./woo-client');
 const { resolveWooCustomerId } = require('./customer-sync');
+const { round2, allocateProportionally, mergeByMethod } = require('../money');
 const config = require('../config');
 
+const PAYMENT_TITLES = { cash: 'Efectivo', card: 'Tarjeta' };
+
+// Normaliza la forma de pago a una lista [{ method, amount }], venga como venga.
+// Acepta también el formato viejo (paymentMethod suelto, sin monto) para no romper
+// las llamadas que ya existen ni las órdenes guardadas antes de los pagos divididos.
+function normalizePayments({ payments, paymentMethod, total }) {
+  const expected = round2(total);
+
+  let list = Array.isArray(payments) && payments.length > 0
+    ? payments
+    : [{ method: paymentMethod || 'cash', amount: expected }];
+
+  list = list
+    .map((p) => ({
+      method: p.method === 'card' ? 'card' : 'cash',
+      amount: round2(Number(p.amount) || 0),
+    }))
+    .filter((p) => p.amount > 0);
+
+  if (list.length === 0) throw new Error('La venta no tiene ningún pago registrado');
+
+  // Dos renglones de "efectivo" son UN solo pago en efectivo. Se fusionan aquí para que
+  // el corte no cuente la misma venta dos veces en el mismo método.
+  list = mergeByMethod(list);
+
+  const sum = round2(list.reduce((s, p) => s + p.amount, 0));
+
+  // Un centavo de tolerancia: el reparto proporcional de un descuento puede dejar medio
+  // centavo colgando. Más que eso es un error de captura y debe detenerse aquí, antes de
+  // que entre al corte -- una venta cuyos pagos no suman el total descuadra la caja.
+  if (Math.abs(sum - expected) > 0.01) {
+    throw new Error(`Los pagos suman $${sum.toFixed(2)} y el total es $${expected.toFixed(2)}`);
+  }
+
+  // Si sobró o faltó un centavo, se ajusta en el pago MÁS GRANDE (nunca en el más chico:
+  // restarle un centavo a un pago de $0.01 lo dejaría en cero).
+  if (sum !== expected) {
+    let biggest = 0;
+    for (let i = 1; i < list.length; i += 1) {
+      if (list[i].amount > list[biggest].amount) biggest = i;
+    }
+    list[biggest].amount = round2(list[biggest].amount + (expected - sum));
+  }
+
+  return list;
+}
+
+function describePayments(payments) {
+  return payments.map((p) => `${PAYMENT_TITLES[p.method]} $${p.amount.toFixed(2)}`).join(' + ');
+}
+
 // cartItems: [{ product_id, name, price, quantity }]
-// cashInfo: { received, change } -- solo relevante si paymentMethod === 'cash'
+// payments:  [{ method, amount }] -- uno solo o varios (pago dividido). Si no se manda,
+//            se arma uno solo por el total con `paymentMethod`.
+// cashInfo:  { received, change } -- solo aplica a la PARTE en efectivo.
 // Construye el payload en formato WooCommerce y lo guarda en la cola local.
 // Devuelve el ticket local de inmediato (no espera red) para poder imprimir ya.
-function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo, customerId, cashSessionId = null, couponCode = null }) {
+function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', payments, cashInfo, customerId, cashSessionId = null, couponCode = null }) {
   const db = getDb();
   const localTicket = nextLocalTicket(config.registerId);
-  const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  // El total sale de line_total, NO de price * quantity.
+  //
+  // BUG CORREGIDO: eran dos cuentas distintas. computeCart() reparte el descuento del
+  // ticket entre las líneas y deja que la última absorba el redondeo, así que
+  // sum(price * quantity) puede diferir en centavos de sum(line_total) -- que es lo que
+  // se imprime en el ticket y lo que main.js le devuelve a la pantalla. Con pagos
+  // divididos esa diferencia ya no es cosmética: haría fallar la validación de que los
+  // pagos suman el total.
+  const total = round2(cartItems.reduce((sum, i) => sum + (i.line_total ?? i.price * i.quantity), 0));
 
-  const paymentTitles = { cash: 'Efectivo', card: 'Tarjeta' };
+  const paymentList = normalizePayments({ payments, paymentMethod, total });
+  const isSplit = paymentList.length > 1;
+  const cashPart = paymentList.find((p) => p.method === 'cash');
+
+  // Qué se guarda en orders_queue.payment_method:
+  //   - un solo método -> 'cash' | 'card', como siempre
+  //   - varios         -> 'split', y el desglose real vive en order_payments
+  // La columna se conserva porque el plugin woo-admin-app y los reportes viejos la leen.
+  const storedMethod = isSplit ? 'split' : paymentList[0].method;
+
   const metaData = [
     { key: '_pos_register_id', value: config.registerId },
     { key: '_pos_local_ticket', value: localTicket },
@@ -35,7 +106,13 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   if (couponCode) {
     metaData.push({ key: '_pos_coupon_code', value: couponCode });
   }
-  if (paymentMethod === 'cash' && cashInfo) {
+
+  // WooCommerce no tiene pagos divididos: una orden lleva UN payment_method y ya.
+  // Por eso el desglose va como meta. Es la única forma de que quien abra la orden en
+  // wp-admin vea con qué se pagó realmente, sin inventar un plugin de pasarela falso.
+  metaData.push({ key: '_pos_payments', value: JSON.stringify(paymentList) });
+
+  if (cashPart && cashInfo) {
     metaData.push({ key: '_pos_cash_received', value: String(cashInfo.received) });
     metaData.push({ key: '_pos_cash_change', value: String(cashInfo.change) });
   }
@@ -50,8 +127,12 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   const customItems = cartItems.filter((i) => i.custom);
 
   const payload = {
-    payment_method: paymentMethod,
-    payment_method_title: paymentTitles[paymentMethod] || paymentMethod,
+    payment_method: isSplit ? 'pos_split' : paymentList[0].method,
+    // El título SÍ lleva el desglose: es lo que se ve en la lista de pedidos de wp-admin
+    // sin tener que abrir la orden ni leer metas.
+    payment_method_title: isSplit
+      ? `Dividido: ${describePayments(paymentList)}`
+      : (PAYMENT_TITLES[paymentList[0].method] || paymentList[0].method),
     set_paid: true,
     status: 'completed',
     customer_note: customerNote,
@@ -101,24 +182,49 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
     custom: Boolean(i.custom),
   }));
 
-  db.prepare(`
+  // La venta y sus pagos se guardan en UNA transacción. Si se guardara la orden y fallara
+  // el insert de los pagos, esa venta quedaría fuera del corte: entraría dinero al cajón
+  // que el sistema no contaría.
+  const insertOrder = db.prepare(`
     INSERT INTO orders_queue
       (local_ticket, register_id, payload_json, display_items_json, total,
        payment_method, cash_session_id, customer_ref, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-  `).run(
-    localTicket,
-    config.registerId,
-    JSON.stringify(payload),
-    JSON.stringify(displayItems),
-    total,
-    paymentMethod,
-    cashSessionId,
-    customerId || null,
-    new Date().toISOString()
-  );
+  `);
+  const insertPayment = db.prepare(`
+    INSERT INTO order_payments (order_local_id, method, amount) VALUES (?, ?, ?)
+  `);
 
-  return { localTicket, payload, cartItems };
+  const save = db.transaction(() => {
+    const result = insertOrder.run(
+      localTicket,
+      config.registerId,
+      JSON.stringify(payload),
+      JSON.stringify(displayItems),
+      total,
+      storedMethod,
+      cashSessionId,
+      customerId || null,
+      new Date().toISOString()
+    );
+    for (const payment of paymentList) {
+      insertPayment.run(result.lastInsertRowid, payment.method, payment.amount);
+    }
+    return result.lastInsertRowid;
+  });
+
+  const orderLocalId = save();
+
+  return { localTicket, orderLocalId, payload, cartItems, payments: paymentList, total };
+}
+
+// El desglose de pagos de una venta. Sale de order_payments, no de las metas del payload:
+// así también funciona para las ventas viejas, a las que la migración les creó su renglón.
+function getOrderPayments(orderId) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT method, amount FROM order_payments WHERE order_local_id = ? ORDER BY id ASC
+  `).all(orderId);
 }
 
 // Intenta sincronizar UNA orden puntual. Se usa tanto en el auto-sync (solo 'pending')
@@ -227,7 +333,22 @@ function getRecentOrders(limit = 50) {
     FROM orders_queue WHERE register_id = ?
     ORDER BY id DESC LIMIT ?
   `).all(config.registerId, limit);
-  return rows;
+
+  if (rows.length === 0) return rows;
+
+  // Los pagos se traen en UNA consulta, no una por venta: con 50 ventas en pantalla,
+  // 50 consultas extra se notan al abrir el historial.
+  const byOrder = new Map();
+  const placeholders = rows.map(() => '?').join(',');
+  for (const p of db.prepare(`
+    SELECT order_local_id, method, amount FROM order_payments
+    WHERE order_local_id IN (${placeholders}) ORDER BY id ASC
+  `).all(...rows.map((r) => r.id))) {
+    if (!byOrder.has(p.order_local_id)) byOrder.set(p.order_local_id, []);
+    byOrder.get(p.order_local_id).push({ method: p.method, amount: p.amount });
+  }
+
+  return rows.map((r) => ({ ...r, payments: byOrder.get(r.id) || [] }));
 }
 
 // Reconstruye los datos que printTicket necesita a partir de lo guardado en la cola.
@@ -245,12 +366,17 @@ function getOrderForReprint(orderId) {
   const received = metaValue('_pos_cash_received');
   const change = metaValue('_pos_cash_change');
 
+  const payments = db.prepare(`
+    SELECT method, amount FROM order_payments WHERE order_local_id = ? ORDER BY id ASC
+  `).all(orderId);
+
   return {
     localTicket: row.local_ticket,
     // Órdenes viejas (anteriores a esta columna) pueden no tener items guardados.
     cartItems: JSON.parse(row.display_items_json || '[]'),
     total: row.total,
     paymentMethod: row.payment_method || payload.payment_method,
+    payments,
     cashInfo: received !== undefined
       ? { received: parseFloat(received), change: parseFloat(change) }
       : null,
@@ -330,10 +456,20 @@ function refundOrderItems(orderId, items, reason = '') {
   amount = Math.round(amount * 100) / 100;
   const pendingTotal = Math.round(((row.total || 0) - (row.refunded_total || 0)) * 100) / 100;
 
+  const orderPayments = db.prepare(`
+    SELECT method, amount FROM order_payments WHERE order_local_id = ? ORDER BY id ASC
+  `).all(orderId);
+
   if (amount >= pendingTotal) {
     // Devolver todo lo que queda = cancelar la venta completa.
     const result = cancelOrder(orderId, reason || 'Devolución total');
-    return { ...result, amount: pendingTotal, items: refundItems, fullCancellation: true };
+    return {
+      ...result,
+      amount: pendingTotal,
+      items: refundItems,
+      payments: splitAcrossPayments(orderPayments, row.total || 0, pendingTotal),
+      fullCancellation: true,
+    };
   }
 
   const tx = db.transaction(() => {
@@ -353,8 +489,17 @@ function refundOrderItems(orderId, items, reason = '') {
     payment_method: row.payment_method,
     amount,
     items: refundItems,
+    payments: splitAcrossPayments(orderPayments, row.total || 0, amount),
     fullCancellation: false,
   };
+}
+
+// Cuánto se le devuelve a cada método. Usa EXACTAMENTE la misma función que el corte de
+// caja (money.js), no una copia parecida: si el comprobante impreso y el corte usaran dos
+// repartos distintos, el papel que se lleva el cliente diría una cosa y la caja otra.
+function splitAcrossPayments(payments, orderTotal, amount) {
+  return allocateProportionally(mergeByMethod(payments), orderTotal, amount)
+    .filter((p) => p.amount !== 0);
 }
 
 // Cuánto se ha devuelto ya de una línea concreta, para no permitir devolver de más.
@@ -488,6 +633,9 @@ async function flushPendingCancellations() {
 
 module.exports = {
   queueOrder,
+  getOrderPayments,
+  normalizePayments,
+  splitAcrossPayments,
   flushPendingOrders,
   retryOrder,
   resolveManually,
