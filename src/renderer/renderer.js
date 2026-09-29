@@ -157,6 +157,19 @@ function renderProductGrid() {
     // Producto variable: abre selector de variación. Simple: agrega/incrementa directo.
     tile.onclick = () => (p.type === 'variable' ? openVariationPicker(p) : addToCart(p));
 
+    // Botón de etiqueta: aparece al pasar el mouse sobre el tile.
+    if (p.sku) {
+      const labelBtn = document.createElement('span');
+      labelBtn.className = 'tile-label-btn';
+      labelBtn.textContent = '🏷';
+      labelBtn.title = 'Imprimir etiqueta';
+      labelBtn.onclick = (e) => {
+        e.stopPropagation();
+        openLabelModal(p);
+      };
+      tile.appendChild(labelBtn);
+    }
+
     // Click en la × del badge = quitar del carrito. Para variables, quita TODAS sus
     // variaciones de un jalón (simplificación -- para quitar solo una, usar el carrito).
     const removeBtn = tile.querySelector('.tb-remove');
@@ -270,6 +283,12 @@ function renderCart() {
   document.getElementById('discountSummaryAmount').textContent = `−${money(computed.totalDiscount)}`;
   document.getElementById('btnTicketDiscount').classList.toggle('active', Boolean(ticketDiscount));
 
+  const couponBtn = document.getElementById('btnCoupon');
+  couponBtn.classList.toggle('active', Boolean(appliedCoupon));
+  couponBtn.textContent = appliedCoupon
+    ? `🎟 ${appliedCoupon.code.toUpperCase()} −${money(computed.couponAmount)}`
+    : '🎟 Cupón';
+
   const totalEl = document.getElementById('totalAmount');
   totalEl.textContent = money(getTotal());
   if (lastAdded && Date.now() - lastAdded.at <= ADD_ANIM_MS) {
@@ -293,6 +312,7 @@ function renderCart() {
 // queda, repartido proporcionalmente entre las líneas.
 
 let ticketDiscount = null;   // { type: 'percent'|'amount', value }
+let appliedCoupon = null;    // { code, discount, discount_type, amount }
 let discountTarget = null;   // null = ticket completo; si no, índice de la línea
 let discountType = 'percent';
 
@@ -314,7 +334,13 @@ function computeCart() {
   });
 
   const afterLineTotal = round2(lines.reduce((sum, l) => sum + l.afterLine, 0));
-  const ticketDiscountAmount = applyDiscount(afterLineTotal, ticketDiscount);
+
+  // Orden: descuento de línea -> cupón -> descuento manual de ticket. El cupón se
+  // calcula localmente (ver coupon-sync.js) y ya viene como monto.
+  const couponAmount = appliedCoupon ? Math.min(appliedCoupon.discount, afterLineTotal) : 0;
+  const afterCoupon = round2(afterLineTotal - couponAmount);
+  const manualTicketAmount = applyDiscount(afterCoupon, ticketDiscount);
+  const ticketDiscountAmount = round2(couponAmount + manualTicketAmount);
 
   // Reparto proporcional del descuento de ticket. La última línea absorbe el redondeo
   // para que la suma de las líneas cuadre EXACTO con el total cobrado.
@@ -337,7 +363,12 @@ function computeCart() {
   const total = round2(lines.reduce((sum, l) => sum + l.finalTotal, 0));
   const listTotal = round2(lines.reduce((sum, l) => sum + l.listSubtotal, 0));
 
-  return { lines, total, listTotal, totalDiscount: round2(listTotal - total), ticketDiscountAmount };
+  return {
+    lines, total, listTotal,
+    totalDiscount: round2(listTotal - total),
+    ticketDiscountAmount,
+    couponAmount,
+  };
 }
 
 function openDiscountModal(targetIndex = null) {
@@ -363,8 +394,9 @@ function openDiscountModal(targetIndex = null) {
 
 function discountBase() {
   if (discountTarget === null) {
-    const { lines } = computeCart();
-    return round2(lines.reduce((sum, l) => sum + l.afterLine, 0));
+    const { lines, couponAmount } = computeCart();
+    const afterLine = round2(lines.reduce((sum, l) => sum + l.afterLine, 0));
+    return round2(afterLine - couponAmount);
   }
   const item = cart[discountTarget];
   return item ? round2(item.price * item.quantity) : 0;
@@ -419,6 +451,44 @@ document.getElementById('btnCloseDiscount').addEventListener('click', () => {
 });
 
 document.getElementById('btnTicketDiscount').addEventListener('click', () => openDiscountModal(null));
+
+// ---------- Cupones ----------
+
+document.getElementById('btnCoupon').addEventListener('click', async () => {
+  if (appliedCoupon) {
+    if (confirm(`Quitar el cupón ${appliedCoupon.code.toUpperCase()}?`)) {
+      appliedCoupon = null;
+      renderCart();
+    }
+    return;
+  }
+
+  if (cart.length === 0) {
+    showToast('Agrega productos antes de aplicar un cupón.', true);
+    return;
+  }
+
+  const code = prompt('Código del cupón:');
+  if (!code) return;
+
+  // Se manda el carrito con el importe de cada línea DESPUÉS de descuentos de línea:
+  // esa es la base sobre la que el cupón aplica.
+  const cartLines = computeCart().lines.map((l) => ({
+    product_id: l.item.custom ? null : l.item.product_id,
+    variation_id: l.item.variation_id || null,
+    quantity: l.item.quantity,
+    amount: l.afterLine,
+    custom: Boolean(l.item.custom),
+  }));
+
+  try {
+    appliedCoupon = await window.pos.evaluateCoupon(code, cartLines);
+    showToast(`Cupón aplicado: −${money(appliedCoupon.discount)}`);
+    renderCart();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});
 
 // ---------- Pago y checkout ----------
 
@@ -530,7 +600,10 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   }));
 
   try {
-    const result = await window.pos.checkout(itemsToCharge, paymentMethod, { received, change }, note, selectedCustomer?.id);
+    const result = await window.pos.checkout(
+      itemsToCharge, paymentMethod, { received, change }, note, selectedCustomer?.id,
+      appliedCoupon?.code || null
+    );
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -540,6 +613,7 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
     );
     cart = [];
     ticketDiscount = null;
+    appliedCoupon = null;
     document.getElementById('cashReceived').value = '';
     document.getElementById('noteCheckbox').checked = false;
     document.getElementById('noteText').value = '';
@@ -733,21 +807,91 @@ async function renderCustomerList(search) {
   }
 
   for (const c of customers) {
+    const entry = document.createElement('div');
+    entry.className = 'customer-entry';
+
     const row = document.createElement('button');
     row.className = 'customer-row';
+    const pendingLabel = c.pending_sync
+      ? 'Pendiente de crearse en WooCommerce'
+      : c.pending_update ? 'Cambios pendientes de subir a WooCommerce' : null;
     row.innerHTML = `
       <div class="cr-name">${customerDisplayName(c)}</div>
-      <div class="cr-detail">${[c.phone, c.whatsapp ? `WA ${c.whatsapp}` : null, c.email].filter(Boolean).join(' · ')}</div>
-      ${c.pending_sync ? '<div class="cr-pending">Pendiente de crearse en WooCommerce</div>' : ''}
+      <div class="cr-detail">${[c.whatsapp ? `WA ${c.whatsapp}` : c.phone, c.email].filter(Boolean).join(' · ')}</div>
+      ${pendingLabel ? `<div class="cr-pending">${pendingLabel}</div>` : ''}
     `;
     row.onclick = () => {
       selectedCustomer = c;
       updateCustomerButton();
       document.getElementById('customerOverlay').classList.remove('show');
     };
-    body.appendChild(row);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-edit-customer';
+    editBtn.textContent = 'Editar';
+    editBtn.onclick = (e) => {
+      e.stopPropagation();
+      openCustomerEditor(c);
+    };
+
+    entry.appendChild(row);
+    entry.appendChild(editBtn);
+    body.appendChild(entry);
   }
 }
+
+// El mismo formulario sirve para crear y para editar: cambia el botón activo y se
+// guarda a quién se está editando.
+let editingCustomerId = null;
+
+function openCustomerEditor(customer) {
+  editingCustomerId = customer.id;
+  document.getElementById('ncFirstName').value = customer.first_name || '';
+  document.getElementById('ncLastName').value = customer.last_name || '';
+  document.getElementById('ncWhatsapp').value = customer.whatsapp || '';
+  document.getElementById('newCustomerForm').classList.add('show');
+  document.getElementById('btnCreateCustomer').style.display = 'none';
+  document.getElementById('btnSaveCustomerEdit').style.display = 'block';
+  document.getElementById('ncFirstName').focus();
+}
+
+document.getElementById('btnSaveCustomerEdit').addEventListener('click', async (e) => {
+  const firstName = document.getElementById('ncFirstName').value.trim();
+  const lastName = document.getElementById('ncLastName').value.trim();
+  if (!firstName && !lastName) {
+    showToast('Captura al menos un nombre.', true);
+    return;
+  }
+
+  e.target.disabled = true;
+  e.target.textContent = 'Guardando...';
+
+  try {
+    const updated = await window.pos.updateCustomer(editingCustomerId, {
+      first_name: firstName,
+      last_name: lastName,
+      whatsapp: document.getElementById('ncWhatsapp').value.trim(),
+    });
+
+    // Si el cliente editado es el que está seleccionado en el carrito, refrescar la
+    // etiqueta del botón para que no siga mostrando el nombre viejo.
+    if (selectedCustomer && selectedCustomer.id === updated.id) {
+      selectedCustomer = updated;
+      updateCustomerButton();
+    }
+
+    showToast(updated.pending_update
+      ? 'Guardado. Se subirá a WooCommerce al sincronizar.'
+      : `Cliente actualizado: ${customerDisplayName(updated)}`);
+    resetNewCustomerForm();
+    renderCustomerList(document.getElementById('customerSearch').value);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+
+  e.target.disabled = false;
+  e.target.textContent = 'Guardar cambios';
+});
 
 document.getElementById('btnSelectCustomer').addEventListener('click', () => {
   document.getElementById('customerOverlay').classList.add('show');
@@ -769,11 +913,19 @@ const NEW_CUSTOMER_INPUTS = ['ncFirstName', 'ncLastName', 'ncWhatsapp'];
 function resetNewCustomerForm() {
   NEW_CUSTOMER_INPUTS.forEach((id) => { document.getElementById(id).value = ''; });
   document.getElementById('newCustomerForm').classList.remove('show');
+  editingCustomerId = null;
+  document.getElementById('btnCreateCustomer').style.display = 'block';
+  document.getElementById('btnSaveCustomerEdit').style.display = 'none';
 }
 
 document.getElementById('btnShowNewCustomer').addEventListener('click', () => {
   const form = document.getElementById('newCustomerForm');
-  form.classList.toggle('show');
+  const wasEditing = editingCustomerId !== null;
+  resetNewCustomerForm();
+  // Si venía de editar, el primer click solo sale de ese modo; si no, abre/cierra.
+  if (!wasEditing) form.classList.toggle('show');
+  else form.classList.add('show');
+
   if (form.classList.contains('show')) {
     // Si venía escribiendo una búsqueda, se aprovecha como nombre.
     const typed = document.getElementById('customerSearch').value.trim();
@@ -952,6 +1104,8 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 // Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
 const OVERLAYS_TOP_FIRST = [
   'settingsOverlay',
+  'labelOverlay',
+  'receivingOverlay',
   'maintenanceOverlay',
   'refundOverlay',
   'discountOverlay',
@@ -1252,6 +1406,226 @@ document.getElementById('btnCreateCustom').addEventListener('click', () => {
   showToast(`Agregado: ${name}`);
 });
 
+// ---------- Recepción de mercancía (sin orden de compra) ----------
+
+let receivingLines = [];   // { product_id, variation_id, name, sku, quantity }
+
+function receivingKey(productId, variationId) {
+  return `${productId}:${variationId || 0}`;
+}
+
+function addToReceiving(match, qty = 1) {
+  const key = receivingKey(match.product_id, match.variation_id);
+  const existing = receivingLines.find((l) => receivingKey(l.product_id, l.variation_id) === key);
+  if (existing) {
+    existing.quantity += qty;
+  } else {
+    receivingLines.push({
+      product_id: match.product_id,
+      variation_id: match.variation_id || null,
+      name: match.name,
+      sku: match.sku || null,
+      quantity: qty,
+    });
+  }
+  renderReceivingLines();
+}
+
+function renderReceivingLines() {
+  const body = document.getElementById('receivingLines');
+  body.innerHTML = '';
+
+  if (receivingLines.length === 0) {
+    body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Nada agregado todavía.</div>';
+    document.getElementById('btnConfirmReceiving').disabled = true;
+    return;
+  }
+
+  receivingLines.forEach((line, index) => {
+    const row = document.createElement('div');
+    row.className = 'recv-line';
+    row.innerHTML = `
+      <div class="rc-info">
+        <div>${line.name}</div>
+        <div class="rc-meta">${line.sku ? `SKU ${line.sku}` : 'sin SKU'}</div>
+      </div>
+      <input class="rc-qty" type="number" min="0" step="1" value="${line.quantity}" />
+      <button class="rc-remove">×</button>
+    `;
+    row.querySelector('.rc-qty').oninput = (e) => {
+      const v = parseFloat(e.target.value);
+      receivingLines[index].quantity = Number.isNaN(v) ? 0 : v;
+      document.getElementById('btnConfirmReceiving').disabled =
+        receivingLines.every((l) => !(l.quantity > 0));
+    };
+    row.querySelector('.rc-remove').onclick = () => {
+      receivingLines.splice(index, 1);
+      renderReceivingLines();
+    };
+    body.appendChild(row);
+  });
+
+  document.getElementById('btnConfirmReceiving').disabled =
+    receivingLines.every((l) => !(l.quantity > 0));
+}
+
+async function renderReceivingResults(search) {
+  const box = document.getElementById('receivingResults');
+  box.innerHTML = '';
+  if (!search || search.length < 2) return;
+
+  const products = await window.pos.getProducts(search);
+  for (const p of products.slice(0, 12)) {
+    const btn = document.createElement('button');
+    btn.className = 'recv-result';
+    btn.innerHTML = `
+      <div>${p.name}</div>
+      <div class="rr-meta">${p.sku ? `SKU ${p.sku}` : 'sin SKU'} · stock ${p.stock_quantity ?? 'n/a'}${p.type === 'variable' ? ' · variable' : ''}</div>
+    `;
+    btn.onclick = async () => {
+      if (p.type === 'variable') {
+        // Un producto variable no tiene stock propio: hay que elegir la variación.
+        const variations = await window.pos.getVariations(p.id);
+        if (variations.length === 0) {
+          showToast('Este producto variable no tiene variaciones sincronizadas.', true);
+          return;
+        }
+        const options = variations
+          .map((v, i) => `${i + 1}) ${variationLabel(v.attributes) || v.sku || v.id}`)
+          .join('\n');
+        const pick = prompt(`${p.name}\n\n¿Cuál variación?\n${options}`);
+        const idx = parseInt(pick, 10) - 1;
+        const v = variations[idx];
+        if (!v) return;
+        addToReceiving({
+          product_id: p.id,
+          variation_id: v.id,
+          name: `${p.name} — ${variationLabel(v.attributes)}`,
+          sku: v.sku,
+        });
+      } else {
+        addToReceiving({ product_id: p.id, variation_id: null, name: p.name, sku: p.sku });
+      }
+      document.getElementById('receivingSearch').value = '';
+      box.innerHTML = '';
+    };
+    box.appendChild(btn);
+  }
+}
+
+document.getElementById('receivingSearch').addEventListener('input', (e) => {
+  renderReceivingResults(e.target.value.trim());
+});
+
+// Escaneo dentro del panel: Enter con un código busca por SKU exacto y suma una pieza.
+document.getElementById('receivingSearch').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const code = e.target.value.trim();
+  if (!code) return;
+
+  try {
+    const match = await window.pos.findBySku(code);
+    if (!match) {
+      showToast(`SKU no encontrado: ${code}`, true);
+      return;
+    }
+    if (match.kind === 'needs-variation') {
+      showToast('Es un producto variable: búscalo por nombre y elige la variación.', true);
+      return;
+    }
+    addToReceiving({ ...match, sku: code });
+    e.target.value = '';
+    document.getElementById('receivingResults').innerHTML = '';
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});
+
+document.getElementById('btnConfirmReceiving').addEventListener('click', async (e) => {
+  const lines = receivingLines.filter((l) => l.quantity > 0);
+  if (lines.length === 0) return;
+
+  const totalPiezas = lines.reduce((sum, l) => sum + l.quantity, 0);
+  if (!confirm(`Se sumarán ${totalPiezas} pieza(s) al inventario en ${lines.length} producto(s).\n\n¿Continuar?`)) return;
+
+  e.target.disabled = true;
+  e.target.textContent = 'Registrando...';
+
+  try {
+    await window.pos.queueReceipt({ lines, note: document.getElementById('receivingNote').value.trim() });
+    showToast('Mercancía recibida. Se aplicará en WooCommerce al sincronizar.');
+    receivingLines = [];
+    document.getElementById('receivingNote').value = '';
+    renderReceivingLines();
+    loadProducts(document.getElementById('search').value);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+
+  e.target.disabled = false;
+  e.target.textContent = 'Recibir e ingresar al inventario';
+});
+
+document.getElementById('btnReceiving').addEventListener('click', () => {
+  document.getElementById('receivingOverlay').classList.add('show');
+  document.getElementById('receivingSearch').value = '';
+  document.getElementById('receivingResults').innerHTML = '';
+  renderReceivingLines();
+  document.getElementById('receivingSearch').focus();
+});
+document.getElementById('btnCloseReceiving').addEventListener('click', () => {
+  document.getElementById('receivingOverlay').classList.remove('show');
+});
+
+// ---------- Etiquetas con código de barras ----------
+
+let labelTarget = null;
+
+function openLabelModal(product) {
+  if (!product.sku) {
+    showToast('Este producto no tiene SKU, así que no se puede generar el código de barras.', true);
+    return;
+  }
+  labelTarget = product;
+  document.getElementById('labelTitle').textContent = product.name;
+  document.getElementById('labelSubtitle').textContent = `SKU ${product.sku} · ${money(product.price)}`;
+  document.getElementById('labelCopies').value = '1';
+  document.getElementById('labelOverlay').classList.add('show');
+  document.getElementById('labelCopies').focus();
+}
+
+document.getElementById('btnCloseLabel').addEventListener('click', () => {
+  document.getElementById('labelOverlay').classList.remove('show');
+});
+
+document.getElementById('btnPrintLabels').addEventListener('click', async (e) => {
+  const copies = parseInt(document.getElementById('labelCopies').value, 10);
+  if (!(copies >= 1)) {
+    showToast('Captura cuántas etiquetas quieres.', true);
+    return;
+  }
+
+  e.target.disabled = true;
+  e.target.textContent = 'Imprimiendo...';
+
+  try {
+    await window.pos.printLabels({
+      name: labelTarget.name,
+      sku: labelTarget.sku,
+      price: labelTarget.price,
+      copies,
+    });
+    showToast(`${copies} etiqueta(s) impresa(s).`);
+    document.getElementById('labelOverlay').classList.remove('show');
+  } catch (err) {
+    showToast(err.message, true);
+  }
+
+  e.target.disabled = false;
+  e.target.textContent = 'Imprimir';
+});
+
 // ---------- Mantenimiento: respaldo y limpieza ----------
 
 function formatBytes(bytes) {
@@ -1335,6 +1709,13 @@ const SETTINGS_FIELDS = {
   setRegister: 'REGISTER_ID',
   setPrinter: 'PRINTER_INTERFACE',
   setPriceAdj: 'PRICE_ADJUSTMENT_PERCENT',
+  setLabelTransport: 'LABEL_PRINTER_TRANSPORT',
+  setLabelHost: 'LABEL_PRINTER_HOST',
+  setLabelPort: 'LABEL_PRINTER_PORT',
+  setLabelShare: 'LABEL_PRINTER_SHARE',
+  setLabelWidth: 'LABEL_WIDTH_MM',
+  setLabelHeight: 'LABEL_HEIGHT_MM',
+  setLabelDpi: 'LABEL_DPI',
   setLogo: 'LOGO_URL',
 };
 
@@ -1361,6 +1742,18 @@ async function openSettings() {
 }
 
 document.getElementById('btnSettings').addEventListener('click', openSettings);
+
+// Permite revisar el diseño de la etiqueta sin tener la impresora: el ZPL se pega en
+// labelary.com/viewer.html y se ve renderizado.
+document.getElementById('btnPreviewLabel').addEventListener('click', async () => {
+  try {
+    const zpl = await window.pos.previewLabelZpl(null);
+    await navigator.clipboard.writeText(zpl);
+    showToast('ZPL copiado. Pégalo en labelary.com/viewer.html para ver la etiqueta.');
+  } catch (err) {
+    showToast(`No se pudo generar el ZPL: ${err.message}`, true);
+  }
+});
 document.getElementById('btnCloseSettings').addEventListener('click', () => {
   document.getElementById('settingsOverlay').classList.remove('show');
 });
@@ -1441,7 +1834,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show, #maintenanceOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show, #maintenanceOverlay.show, #receivingOverlay.show, #labelOverlay.show'
   );
   if (anyOverlayOpen) return;
 
