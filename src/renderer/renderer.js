@@ -1661,7 +1661,20 @@ async function renderMaintenancePanel() {
 
   const storeChanged = store.stored && store.current && store.stored !== store.current;
 
+  let schemaProblems = [];
+  try {
+    schemaProblems = (await window.pos.getDiagnostics()).schemaProblems || [];
+  } catch { /* si el diagnóstico falla, el resto del panel igual debe cargar */ }
+
   body.innerHTML = `
+    ${schemaProblems.length ? `
+      <div class="store-alert">
+        <strong>La base no coincide con el código</strong>
+        <div>Falta: ${schemaProblems.slice(0, 4).join(', ')}${schemaProblems.length > 4 ? '…' : ''}</div>
+        <div style="margin-top:6px;">Casi siempre significa que algún archivo de src/ quedó de una
+        versión anterior. Actualiza el proyecto completo y vuelve a instalar.</div>
+      </div>
+    ` : ''}
     ${store.blocked ? `
       <div class="store-alert">
         <strong>Sync detenido: la caja apunta a otra tienda</strong>
@@ -1771,7 +1784,14 @@ async function openDiagnostics() {
   try {
     const d = await window.pos.getDiagnostics();
     const errores = Object.entries(d.lastErrors || {});
+    const problemas = d.schemaProblems || [];
     const lineas = [
+      ...(problemas.length ? [
+        '*** LA BASE NO COINCIDE CON EL CÓDIGO ***',
+        'Casi siempre significa que algún archivo de src/ quedó de una versión anterior.',
+        ...problemas.map((p) => `  - ${p}`),
+        '',
+      ] : []),
       '=== CONFIGURACIÓN ===',
       `Configurada:     ${d.config?.configured}`,
       `Tienda:          ${d.config?.storeURL || '(sin configurar)'}`,
