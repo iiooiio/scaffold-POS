@@ -497,6 +497,40 @@ El generador de ZPL se probó por separado (no en hardware):
 **Sin verificar**: el resultado físico. El tamaño de etiqueta, el DPI y la calibración
 del sensor de troquel dependen de tu impresora y tu rollo.
 
+## Cambiar de tienda (dev → producción)
+
+Si apuntas la caja a otra URL de WooCommerce, la caché local queda inconsistente: el sync
+de catálogo es incremental (`modified_after`) y **ese cursor vive en la base local**. Con
+el cursor de la tienda anterior, la tienda nueva solo devuelve lo modificado después de
+esa fecha — casi nada — y los productos viejos se quedan ahí porque nada los borra.
+
+Ahora la app detecta el cambio al arrancar (guarda la URL en `sync_meta.site_url`) y:
+
+- **Sin movimientos pendientes** → respalda, borra catálogo, variaciones, clientes,
+  cupones e imágenes, **borra el cursor** para forzar un sync completo, y registra la
+  tienda nueva.
+- **Con movimientos pendientes** → NO limpia ni sincroniza nada y muestra un aviso en
+  Mantenimiento. Ventas, cancelaciones, devoluciones y recepciones sin subir pertenecen a
+  la tienda anterior; mandarlas a la nueva movería dinero o inventario real en el sitio
+  equivocado. Vuelve a apuntar a la tienda anterior para que suba todo, o resuélvelo
+  desde el panel de errores.
+
+**Los clientes pendientes no bloquean el cambio** a propósito: un registro de contacto no
+es una transacción. Se conservan y se crearán en la tienda nueva.
+
+**Las ventas, turnos y cortes nunca se borran** en ningún caso: son el historial de esta
+caja y no se pueden recuperar de ningún Woo.
+
+### Forzar resincronización completa
+
+En **Mantenimiento** hay un botón que hace lo mismo a mano, sin cambiar de tienda: borra
+catálogo/clientes/cupones/imágenes, borra el cursor y vuelve a traer todo. Úsalo si la
+caché quedó desfasada por cualquier motivo.
+
+Es también la salida para una base que ya venía apuntando a otra tienda **antes** de que
+existiera esta verificación: en ese caso la app no tiene con qué comparar y solo registra
+la URL actual, así que el reset hay que dispararlo una vez a mano.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
