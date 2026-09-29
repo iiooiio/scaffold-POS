@@ -1639,8 +1639,33 @@ async function renderMaintenancePanel() {
   body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando...</div>';
 
   const { cache, backups, backupDir } = await window.pos.getMaintenanceStats();
+  const store = await window.pos.getStoreStatus();
+
+  const storeChanged = store.stored && store.current && store.stored !== store.current;
 
   body.innerHTML = `
+    ${store.blocked ? `
+      <div class="store-alert">
+        <strong>Sync detenido: la caja apunta a otra tienda</strong>
+        <div>Antes: ${store.blocked.stored}</div>
+        <div>Ahora: ${store.blocked.current}</div>
+        <div style="margin-top:6px;">Hay movimientos locales que pertenecen a la tienda anterior y se
+        subirían a la equivocada: ${store.blocked.pending.orders} venta(s),
+        ${store.blocked.pending.cancellations} cancelación(es), ${store.blocked.pending.refunds} devolución(es),
+        ${store.blocked.pending.receipts} recepción(es).</div>
+        <div style="margin-top:6px;">Vuelve a apuntar a la tienda anterior para que suba todo, o resuélvelo
+        manualmente desde el panel de errores.</div>
+      </div>
+    ` : storeChanged ? `
+      <div class="store-alert">
+        <strong>La caja cambió de tienda</strong>
+        <div>La caché se limpiará en el próximo arranque.</div>
+      </div>
+    ` : ''}
+
+    <div class="cash-section-title">Tienda</div>
+    <div class="cash-line"><span class="muted">Apuntando a</span><span>${store.current || '(sin configurar)'}</span></div>
+
     <div class="cash-section-title">Contenido local</div>
     <div class="cash-line"><span class="muted">Productos</span><span>${cache.products}</span></div>
     <div class="cash-line"><span class="muted">Variaciones</span><span>${cache.variations}</span></div>
@@ -1656,6 +1681,11 @@ async function renderMaintenancePanel() {
     ${backups.length > 0
       ? backups.map((b) => `<div class="backup-row"><span>${new Date(b.mtime).toLocaleString()}</span><span>${formatBytes(b.size)}</span></div>`).join('')
       : '<div class="backup-row"><span>Sin respaldos todavía</span></div>'}
+
+    <div class="cash-section-title">Resincronización completa</div>
+    <div class="subtitle">Borra el catálogo, clientes, cupones e imágenes locales y los vuelve a
+    traer desde cero. Úsalo si cambiaste de tienda o si el catálogo quedó desfasado. Las ventas NO se tocan.</div>
+    <button class="cash-action-btn secondary" id="btnForceResync">Forzar resincronización completa</button>
 
     <div class="cash-section-title">Limpiar caché</div>
     <div class="subtitle">Borra de esta caja los productos y clientes que ya no existen en
@@ -1676,6 +1706,20 @@ async function renderMaintenancePanel() {
   };
 
   document.getElementById('btnOpenBackups').onclick = () => window.pos.openBackupsFolder();
+
+  document.getElementById('btnForceResync').onclick = async (e) => {
+    if (!confirm('Se hará un respaldo, se borrará el catálogo/clientes/cupones locales y se volverán a traer desde cero.\n\nLas ventas no se tocan. ¿Continuar?')) return;
+    e.target.disabled = true;
+    e.target.textContent = 'Resincronizando...';
+    try {
+      const r = await window.pos.forceFullResync();
+      showToast(`Listo: se limpiaron ${r.products} productos, ${r.variations} variaciones, ${r.customers} clientes y ${r.images} imágenes. Catálogo traído de nuevo.`);
+      loadProducts(document.getElementById('search').value);
+    } catch (err) {
+      showToast(`Falló la resincronización: ${err.message}`, true);
+    }
+    renderMaintenancePanel();
+  };
 
   document.getElementById('btnCleanup').onclick = async (e) => {
     if (!confirm('Se hará un respaldo automático y luego se borrarán de esta caja los productos y clientes que ya no existan en la tienda en línea.\n\n¿Continuar?')) return;
