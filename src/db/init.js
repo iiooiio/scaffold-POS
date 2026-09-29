@@ -78,7 +78,8 @@ function getDb() {
       -- conexión, id es negativo temporal y woo_id se llena al sincronizar.
       id INTEGER PRIMARY KEY,
       woo_id INTEGER,
-      pending_sync INTEGER NOT NULL DEFAULT 0,
+      pending_sync INTEGER NOT NULL DEFAULT 0,   -- creado aquí, aún no existe en Woo
+      pending_update INTEGER NOT NULL DEFAULT 0, -- editado aquí, falta empujar el cambio
       first_name TEXT,
       last_name TEXT,
       email TEXT,                      -- generado desde el nombre si no se capturó uno
@@ -123,6 +124,48 @@ function getDb() {
       error_message TEXT,
       created_at TEXT NOT NULL,
       synced_at TEXT
+    );
+
+    -- Cupones sincronizados desde WooCommerce. Se guardan localmente para poder
+    -- validarlos y calcular el descuento sin conexión.
+    CREATE TABLE IF NOT EXISTS coupons (
+      id INTEGER PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      discount_type TEXT,              -- percent | fixed_cart | fixed_product
+      amount REAL,
+      minimum_amount REAL,
+      maximum_amount REAL,
+      date_expires TEXT,
+      usage_limit INTEGER,
+      usage_count INTEGER,
+      individual_use INTEGER,
+      product_ids TEXT,                -- JSON array
+      excluded_product_ids TEXT,       -- JSON array
+      updated_at TEXT
+    );
+
+    -- Recepción de mercancía SIN orden de compra previa (entrada directa a inventario).
+    -- Se encola local para que funcione sin conexión, igual que las ventas.
+    CREATE TABLE IF NOT EXISTS stock_receipts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      register_id TEXT NOT NULL,
+      note TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | synced | error
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      synced_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS stock_receipt_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      receipt_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      variation_id INTEGER,
+      name TEXT,
+      sku TEXT,
+      quantity REAL NOT NULL,
+      applied INTEGER NOT NULL DEFAULT 0,      -- ya se sumó en WooCommerce
+      error_message TEXT
     );
 
     CREATE TABLE IF NOT EXISTS counters (
@@ -172,6 +215,9 @@ function getDb() {
   if (!customerCols.includes('whatsapp')) {
     db.exec(`ALTER TABLE customers ADD COLUMN whatsapp TEXT`);
   }
+  if (!customerCols.includes('pending_update')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN pending_update INTEGER NOT NULL DEFAULT 0`);
+  }
   if (!customerCols.includes('pending_sync')) {
     db.exec(`ALTER TABLE customers ADD COLUMN pending_sync INTEGER NOT NULL DEFAULT 0`);
   }
@@ -201,4 +247,49 @@ function nextLocalTicket(registerId) {
   return `${registerId}-${String(n).padStart(6, '0')}`;
 }
 
-module.exports = { getDb, nextLocalTicket };
+// Verifica que el esquema sea el que el código espera.
+//
+// POR QUÉ EXISTE: si un archivo del proyecto queda de una versión anterior, las tablas y
+// columnas que introdujo nunca se crean, y el síntoma aparece disperso en veinte lugares
+// distintos ("no such table", "no such column") sin que nadie relacione la causa. Esto lo
+// convierte en un solo diagnóstico legible.
+const REQUIRED_SCHEMA = {
+  products: ['id', 'sku', 'name', 'type', 'price', 'manage_stock', 'stock_quantity', 'status', 'image_local_path'],
+  product_variations: ['id', 'parent_id', 'sku', 'price', 'attributes_json', 'image_local_path'],
+  customers: ['id', 'woo_id', 'pending_sync', 'pending_update', 'first_name', 'last_name', 'email', 'phone', 'whatsapp'],
+  coupons: ['id', 'code', 'discount_type', 'amount', 'usage_limit', 'usage_count'],
+  orders_queue: ['id', 'local_ticket', 'register_id', 'payload_json', 'display_items_json', 'total',
+                 'payment_method', 'cash_session_id', 'customer_ref', 'cancelled_at', 'cancel_reason',
+                 'refunded_total', 'status'],
+  refunds_queue: ['id', 'order_local_id', 'amount', 'items_json', 'status'],
+  stock_receipts: ['id', 'register_id', 'status'],
+  stock_receipt_lines: ['id', 'receipt_id', 'product_id', 'quantity', 'applied'],
+  cash_sessions: ['id', 'register_id', 'opened_at', 'opening_float', 'status'],
+  cash_movements: ['id', 'session_id', 'type', 'amount'],
+  sync_meta: ['key', 'value'],
+  counters: ['name', 'value'],
+};
+
+function verifySchema() {
+  const db = getDb();
+  const problems = [];
+
+  const tables = new Set(
+    db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map((r) => r.name)
+  );
+
+  for (const [table, columns] of Object.entries(REQUIRED_SCHEMA)) {
+    if (!tables.has(table)) {
+      problems.push(`falta la tabla "${table}"`);
+      continue;
+    }
+    const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const col of columns) {
+      if (!existing.has(col)) problems.push(`falta la columna "${table}.${col}"`);
+    }
+  }
+
+  return problems;
+}
+
+module.exports = { getDb, nextLocalTicket, verifySchema };
