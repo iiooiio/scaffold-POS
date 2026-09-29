@@ -168,6 +168,15 @@ function getDb() {
       error_message TEXT
     );
 
+    -- Pagos de cada venta. Una venta puede pagarse con varios métodos, así que el
+    -- método dejó de ser una columna de la orden y pasó a ser una tabla aparte.
+    CREATE TABLE IF NOT EXISTS order_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_local_id INTEGER NOT NULL,
+      method TEXT NOT NULL,            -- cash | card
+      amount REAL NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS counters (
       name TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
@@ -204,6 +213,27 @@ function getDb() {
       UPDATE orders_queue SET refunded_total = COALESCE(total, 0)
       WHERE status IN ('cancelled_local', 'cancel_pending', 'cancelled')
     `);
+  }
+
+  // Ventas anteriores a los pagos divididos: se les crea su renglón de pago a partir
+  // del método único que tenían. Sin esto, los cortes de turnos ya cerrados cambiarían
+  // de golpe al actualizar, porque sus ventas quedarían sin ningún pago registrado.
+  const payMigrated = db.prepare(`SELECT value FROM sync_meta WHERE key = 'payments_backfilled'`).get();
+  if (!payMigrated) {
+    const pending = db.prepare(`
+      SELECT id, total, payment_method FROM orders_queue
+      WHERE id NOT IN (SELECT order_local_id FROM order_payments)
+    `).all();
+    const insert = db.prepare(`INSERT INTO order_payments (order_local_id, method, amount) VALUES (?, ?, ?)`);
+    const tx = db.transaction((rows) => {
+      for (const row of rows) {
+        insert.run(row.id, row.payment_method || 'cash', row.total || 0);
+      }
+      db.prepare(`INSERT INTO sync_meta (key, value) VALUES ('payments_backfilled', ?)
+                  ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+        .run(new Date().toISOString());
+    });
+    tx(pending);
   }
 
   const customerCols = db.prepare(`PRAGMA table_info(customers)`).all().map((c) => c.name);
@@ -262,6 +292,7 @@ const REQUIRED_SCHEMA = {
                  'payment_method', 'cash_session_id', 'customer_ref', 'cancelled_at', 'cancel_reason',
                  'refunded_total', 'status'],
   refunds_queue: ['id', 'order_local_id', 'amount', 'items_json', 'status'],
+  order_payments: ['id', 'order_local_id', 'method', 'amount'],
   stock_receipts: ['id', 'register_id', 'status'],
   stock_receipt_lines: ['id', 'receipt_id', 'product_id', 'quantity', 'applied'],
   cash_sessions: ['id', 'register_id', 'opened_at', 'opening_float', 'status'],
