@@ -22,8 +22,9 @@ contextBridge.exposeInMainWorld('pos', {
   updateCustomer: (id, data) => ipcRenderer.invoke('customers:update', { id, data }),
   evaluateCoupon: (code, cartLines) => ipcRenderer.invoke('coupons:evaluate', { code, cartLines }),
   syncCouponsNow: () => ipcRenderer.invoke('coupons:sync-now'),
-  checkout: (cartItems, paymentMethod, cashInfo, note, customerId, couponCode) =>
-    ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo, note, customerId, couponCode }),
+  // Recibe un objeto, no argumentos sueltos: ya eran seis y con los pagos divididos serían
+  // siete posicionales, donde equivocarse de orden no truena, cobra mal.
+  checkout: (args) => ipcRenderer.invoke('order:checkout', args),
   syncQueueNow: () => ipcRenderer.invoke('queue:sync-now'),
   getQueueSummary: () => ipcRenderer.invoke('queue:summary'),
   getQueueErrors: () => ipcRenderer.invoke('queue:errors'),
