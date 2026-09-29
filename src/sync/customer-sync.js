@@ -1,6 +1,6 @@
 const { getDb } = require('../db/init');
 const config = require('../config');
-const { fetchAllCustomers, createCustomer, isOnline } = require('./woo-client');
+const { fetchAllCustomers, createCustomer, updateCustomer, isOnline } = require('./woo-client');
 
 function upsertCustomer(db, c) {
   db.prepare(`
@@ -35,8 +35,18 @@ async function syncCustomers() {
   const db = getDb();
   const customers = await fetchAllCustomers();
 
+  // No se pisan los clientes con una edición local sin subir: el sync traería los datos
+  // viejos de Woo y se perdería el cambio que el cajero acaba de hacer.
+  const locked = new Set(
+    db.prepare(`SELECT woo_id FROM customers WHERE pending_update = 1 AND woo_id IS NOT NULL`)
+      .all().map((r) => r.woo_id)
+  );
+
   const tx = db.transaction((items) => {
-    for (const c of items) upsertCustomer(db, c);
+    for (const c of items) {
+      if (locked.has(c.id)) continue;
+      upsertCustomer(db, c);
+    }
   });
   tx(customers);
 
@@ -136,6 +146,48 @@ async function createLocalCustomer({ first_name = '', last_name = '', phone = ''
   return { ...db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId), created_in_woo: false };
 }
 
+// Edita un cliente. Si hay conexión y ya existe en Woo, el cambio sube de inmediato;
+// si no, queda marcado como pending_update y se empuja al sincronizar.
+//
+// El correo NO se regenera aunque cambie el nombre: en WooCommerce el email es la
+// identidad del cliente, y cambiarlo rompería la liga con sus pedidos anteriores.
+async function updateLocalCustomer(localId, { first_name = '', last_name = '', whatsapp = '' }) {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId);
+  if (!row) throw new Error('Cliente no encontrado');
+  if (!first_name.trim() && !last_name.trim()) throw new Error('Captura al menos un nombre');
+
+  const phone = whatsapp.trim() || row.phone || null;
+
+  db.prepare(`
+    UPDATE customers SET first_name = ?, last_name = ?, whatsapp = ?, phone = ?, updated_at = ?
+    WHERE id = ?
+  `).run(first_name, last_name, whatsapp.trim() || null, phone, new Date().toISOString(), localId);
+
+  // Todavía no existe en Woo: se creará con los datos nuevos, no hay nada que empujar.
+  if (row.pending_sync) return db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId);
+
+  const payload = {
+    first_name,
+    last_name,
+    billing: { first_name, last_name, email: row.email, phone: phone || '' },
+    meta_data: whatsapp.trim() ? [{ key: '_pos_whatsapp', value: whatsapp.trim() }] : [],
+  };
+
+  if (await isOnline()) {
+    try {
+      await updateCustomer(row.woo_id, payload);
+      db.prepare(`UPDATE customers SET pending_update = 0 WHERE id = ?`).run(localId);
+      return db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId);
+    } catch (err) {
+      console.error('[clientes] fallo al actualizar en Woo:', err.message);
+    }
+  }
+
+  db.prepare(`UPDATE customers SET pending_update = 1 WHERE id = ?`).run(localId);
+  return db.prepare(`SELECT * FROM customers WHERE id = ?`).get(localId);
+}
+
 // Sube a Woo los clientes creados sin conexión. El id local se conserva; solo se llena
 // woo_id, así que las órdenes que ya lo referencian siguen apuntando bien.
 async function flushPendingCustomers() {
@@ -167,7 +219,33 @@ async function flushPendingCustomers() {
     }
   }
 
-  return { attempted: pending.length, synced, failed };
+  // Ediciones locales pendientes de empujar.
+  const edited = db.prepare(`
+    SELECT * FROM customers WHERE pending_update = 1 AND pending_sync = 0 AND woo_id IS NOT NULL
+  `).all();
+
+  for (const row of edited) {
+    try {
+      await updateCustomer(row.woo_id, {
+        first_name: row.first_name || '',
+        last_name: row.last_name || '',
+        billing: {
+          first_name: row.first_name || '',
+          last_name: row.last_name || '',
+          email: row.email,
+          phone: row.phone || '',
+        },
+        meta_data: row.whatsapp ? [{ key: '_pos_whatsapp', value: row.whatsapp }] : [],
+      });
+      db.prepare(`UPDATE customers SET pending_update = 0 WHERE id = ?`).run(row.id);
+      synced += 1;
+    } catch (err) {
+      console.error(`[clientes] fallo al actualizar ${row.email}:`, err.message);
+      failed += 1;
+    }
+  }
+
+  return { attempted: pending.length + edited.length, synced, failed };
 }
 
 // Resuelve el id de WooCommerce de un cliente local. Devuelve null si todavía está
@@ -183,6 +261,7 @@ module.exports = {
   syncCustomers,
   getLocalCustomers,
   createLocalCustomer,
+  updateLocalCustomer,
   flushPendingCustomers,
   resolveWooCustomerId,
 };
