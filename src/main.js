@@ -10,6 +10,7 @@ const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSum
 const { syncCustomers, getLocalCustomers, createLocalCustomer, updateLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
 const { syncCoupons, evaluateCoupon } = require('./sync/coupon-sync');
 const { queueReceipt, flushPendingReceipts, getRecentReceipts } = require('./sync/receiving');
+const { ensureStoreMatches, forceFullResync, getStoreStatus } = require('./sync/store-guard');
 const { printTicket, printCashReport, printCancellation, printPartialRefund } = require('./print/printer');
 const { printLabels, previewLabelZpl } = require('./print/label-printer');
 const cash = require('./cash/cash-session');
@@ -18,6 +19,9 @@ const { cleanupCache, getCacheStats } = require('./db/cleanup');
 
 let mainWindow;
 let logoLocalPath = null;
+// Si la caja apunta a una tienda distinta y hay trabajo local sin subir, el sync queda
+// bloqueado hasta que el usuario lo resuelva (ver store-guard.js).
+let storeBlocked = null;
 
 // Descarga el logo una sola vez (no depende del sync de catálogo, es un archivo aparte).
 // Si LOGO_URL no está configurado en .env, no hace nada y la UI simplemente no muestra logo.
@@ -106,12 +110,28 @@ app.whenReady().then(async () => {
     await downloadLogoIfConfigured();
   }
 
+  // ANTES de cualquier sync: verificar que la caja siga apuntando a la misma tienda.
+  // Si cambió, se limpia la caché local; si hay trabajo pendiente de la tienda anterior,
+  // se bloquea el sync en vez de mandarlo al sitio equivocado.
+  try {
+    const store = await ensureStoreMatches();
+    if (store.blocked) {
+      storeBlocked = store;
+      console.error('[tienda] cambio de tienda bloqueado: hay trabajo local sin subir');
+    } else if (store.changed) {
+      console.log('[tienda] cambió de tienda, caché local limpiada');
+    }
+  } catch (err) {
+    console.error('[tienda] fallo al verificar la tienda:', err.message);
+  }
+
   createWindow();
 
   // Loop de sincronización en background: catálogo + cola de órdenes.
   // Si no hay conexión o falta configuración, no hace nada y no se cae la app.
   setInterval(async () => {
     if (!config.isConfigured()) return;
+    if (storeBlocked) return; // apunta a otra tienda y hay trabajo local sin subir
     try {
       await syncCatalog();
     } catch (err) {
@@ -152,6 +172,7 @@ app.whenReady().then(async () => {
   // Intervalo aparte para clientes, más espaciado -- ver comentario en config.js.
   const runCustomerSync = () => {
     if (!config.isConfigured()) return;
+    if (storeBlocked) return;
     syncCustomers().catch((err) => console.error('[sync clientes] fallo:', err.message));
     // Los cupones cambian poco; van en el mismo intervalo espaciado que los clientes.
     syncCoupons().catch((err) => console.error('[sync cupones] fallo:', err.message));
@@ -271,6 +292,13 @@ ipcMain.handle('maintenance:stats', () => ({
 ipcMain.handle('maintenance:backup-now', async () => createBackup('manual'));
 ipcMain.handle('maintenance:cleanup', async () => cleanupCache());
 ipcMain.handle('maintenance:open-backups', async () => shell.openPath(backupDir()));
+ipcMain.handle('maintenance:store-status', () => ({ ...getStoreStatus(), blocked: storeBlocked }));
+ipcMain.handle('maintenance:force-resync', async () => {
+  const result = await forceFullResync();
+  // Tras el reset, se sincroniza de inmediato para no dejar el catálogo vacío.
+  await syncCatalog();
+  return result;
+});
 
 ipcMain.handle('receiving:queue', (_e, data) => queueReceipt(data));
 ipcMain.handle('receiving:recent', () => getRecentReceipts());
