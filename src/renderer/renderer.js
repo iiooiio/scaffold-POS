@@ -497,7 +497,18 @@ document.querySelectorAll('.pay-btn').forEach((btn) => {
     paymentMethod = btn.dataset.method;
     document.querySelectorAll('.pay-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('cashRow').classList.toggle('show', paymentMethod === 'cash');
+
+    document.getElementById('splitRow').classList.toggle('show', paymentMethod === 'split');
+    // El renglón de "Recibido" también aplica al dividido: si parte se paga en efectivo,
+    // el cliente puede dar un billete de más y hay que calcularle el cambio.
+    document.getElementById('cashRow').classList.toggle('show', paymentMethod !== 'card');
+    document.querySelector('label[for="cashReceived"]').textContent =
+      paymentMethod === 'split' ? 'Recibido en efectivo' : 'Recibido';
+
+    // Al entrar a dividido se propone el total en efectivo: es el caso más común
+    // («tanto con tarjeta y el resto en efectivo»), y el cajero solo captura el otro lado.
+    if (paymentMethod === 'split') resetSplit();
+
     updateChangeAndCheckoutState();
   };
 });
@@ -506,36 +517,100 @@ function getTotal() {
   return computeCart().total;
 }
 
+// Cuánto de esta venta se paga en EFECTIVO. Es lo que determina el cambio y las pills:
+// en un pago dividido, el cambio se calcula contra la parte en efectivo, no contra el
+// total -- si no, entregar $500 por una venta de $500 pagada mitad con tarjeta mostraría
+// cambio $0 cuando en realidad se le deben $250.
+function getCashDue() {
+  if (paymentMethod === 'card') return 0;
+  if (paymentMethod === 'split') return round2(parseFloat(document.getElementById('splitCash').value) || 0);
+  return getTotal();
+}
+
+function resetSplit() {
+  document.getElementById('splitCash').value = getTotal().toFixed(2);
+  document.getElementById('splitCard').value = '';
+  document.getElementById('cashReceived').value = '';
+}
+
+// Al capturar un lado, el otro se completa solo con lo que falta. Es el gesto que ahorra
+// tiempo en mostrador: el cliente dice cuánto va con tarjeta y el efectivo sale solo.
+function autofillSplitCounterpart(editedId) {
+  const total = getTotal();
+  const otherId = editedId === 'splitCash' ? 'splitCard' : 'splitCash';
+  const edited = round2(parseFloat(document.getElementById(editedId).value) || 0);
+  const rest = round2(total - edited);
+  document.getElementById(otherId).value = rest > 0 ? rest.toFixed(2) : '0.00';
+}
+
+function updateSplitState() {
+  const total = getTotal();
+  const cashPart = round2(parseFloat(document.getElementById('splitCash').value) || 0);
+  const cardPart = round2(parseFloat(document.getElementById('splitCard').value) || 0);
+  const remaining = round2(total - cashPart - cardPart);
+
+  const row = document.getElementById('splitRemaining');
+  document.getElementById('splitRemainingAmount').textContent = money(remaining);
+  // Un centavo de tolerancia, el mismo que valida el backend en normalizePayments().
+  const balanced = Math.abs(remaining) <= 0.01;
+  row.classList.toggle('ok', balanced);
+  row.classList.toggle('off', !balanced);
+
+  return { cashPart, cardPart, balanced };
+}
+
 // Calcula el cambio en vivo y bloquea "Cobrar" si el efectivo recibido no alcanza.
 // Con tarjeta no aplica -- se asume que se cobra el monto exacto en la terminal.
 function updateChangeAndCheckoutState() {
   const btn = document.getElementById('btnCheckout');
-  const total = getTotal();
 
-  if (paymentMethod !== 'cash') {
+  let splitOk = true;
+  if (paymentMethod === 'split') splitOk = updateSplitState().balanced;
+
+  if (paymentMethod === 'card') {
     document.getElementById('changeRow').classList.remove('insufficient');
     document.getElementById('changeAmount').textContent = '';
     btn.disabled = cart.length === 0;
     return;
   }
 
+  const cashDue = getCashDue();
   const receivedInput = document.getElementById('cashReceived');
   const typed = receivedInput.value.trim() !== '';
   const received = parseFloat(receivedInput.value) || 0;
-  const change = received - total;
+  const change = received - cashDue;
 
   // Campo vacío = el cliente paga exacto. Antes se trataba como "recibió $0", así que
   // el botón de cobrar quedaba bloqueado hasta elegir una pill, aunque no hiciera falta
   // capturar nada. Solo se bloquea si el cajero SÍ escribió un monto y no alcanza.
-  const insufficient = typed && received < total;
+  const insufficient = typed && received < cashDue;
 
   document.getElementById('changeAmount').textContent = typed ? money(Math.max(change, 0)) : '—';
   document.getElementById('changeRow').classList.toggle('insufficient', insufficient);
   receivedInput.classList.toggle('insufficient', insufficient);
 
-  renderCashPills(total, received);
+  renderCashPills(cashDue, received);
 
-  btn.disabled = cart.length === 0 || insufficient;
+  btn.disabled = cart.length === 0 || insufficient || !splitOk;
+}
+
+for (const id of ['splitCash', 'splitCard']) {
+  document.getElementById(id).addEventListener('input', () => {
+    autofillSplitCounterpart(id);
+    updateChangeAndCheckoutState();
+  });
+}
+
+function resetPaymentMethod() {
+  paymentMethod = 'cash';
+  document.querySelectorAll('.pay-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.method === 'cash');
+  });
+  document.getElementById('splitRow').classList.remove('show');
+  document.getElementById('cashRow').classList.add('show');
+  document.querySelector('label[for="cashReceived"]').textContent = 'Recibido';
+  document.getElementById('splitCash').value = '';
+  document.getElementById('splitCard').value = '';
 }
 
 function renderCashPills(total, currentReceived) {
@@ -576,13 +651,30 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   btn.textContent = 'Procesando...';
 
   const total = getTotal();
+
+  // El desglose de pagos. Con un solo método es un renglón por el total; con dividido,
+  // lo capturado. El backend vuelve a validar que sumen el total: esta pantalla no es la
+  // única línea de defensa, porque un descuadre aquí se arrastra hasta el corte.
+  let payments;
+  if (paymentMethod === 'split') {
+    const { cashPart, cardPart } = updateSplitState();
+    payments = [
+      { method: 'cash', amount: cashPart },
+      { method: 'card', amount: cardPart },
+    ].filter((p) => p.amount > 0);
+  } else {
+    payments = [{ method: paymentMethod, amount: total }];
+  }
+
+  // El cambio se calcula contra la parte en EFECTIVO, no contra el total de la venta.
+  const cashDue = getCashDue();
   // Sin monto capturado se asume pago exacto; si no, el ticket imprimiría "Recibido
   // $0.00" y un cambio negativo.
   const typedReceived = document.getElementById('cashReceived').value.trim();
-  const received = paymentMethod === 'cash' && typedReceived !== ''
+  const received = cashDue > 0 && typedReceived !== ''
     ? parseFloat(typedReceived) || 0
-    : total;
-  const change = paymentMethod === 'cash' ? round2(received - total) : 0;
+    : cashDue;
+  const change = cashDue > 0 ? round2(received - cashDue) : 0;
   const noteChecked = document.getElementById('noteCheckbox').checked;
   const note = noteChecked ? document.getElementById('noteText').value.trim() : '';
 
@@ -600,10 +692,15 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
   }));
 
   try {
-    const result = await window.pos.checkout(
-      itemsToCharge, paymentMethod, { received, change }, note, selectedCustomer?.id,
-      appliedCoupon?.code || null
-    );
+    const result = await window.pos.checkout({
+      cartItems: itemsToCharge,
+      paymentMethod,
+      payments,
+      cashInfo: { received, change },
+      note,
+      customerId: selectedCustomer?.id,
+      couponCode: appliedCoupon?.code || null,
+    });
     document.getElementById('lastTicket').textContent = result.localTicket;
     showToast(
       result.printed
@@ -615,6 +712,9 @@ document.getElementById('btnCheckout').addEventListener('click', async () => {
     ticketDiscount = null;
     appliedCoupon = null;
     document.getElementById('cashReceived').value = '';
+    // El modo de pago vuelve a Efectivo después de cada venta: dejar "Dividido" activo
+    // con los montos de la venta anterior es la receta para cobrar mal la siguiente.
+    resetPaymentMethod();
     document.getElementById('noteCheckbox').checked = false;
     document.getElementById('noteText').value = '';
     document.getElementById('noteText').classList.remove('show');
@@ -1156,6 +1256,20 @@ const STATUS_LABELS = {
 
 const CANCELLED_STATUSES = ['cancelled_local', 'cancel_pending', 'cancelled'];
 
+const PAYMENT_LABELS = { cash: 'Efectivo', card: 'Tarjeta' };
+
+// En el historial, un pago dividido se muestra con sus montos: "Efectivo $120 + Tarjeta
+// $80". Decir solo "Dividido" obligaría a abrir la venta para saber qué se cobró dónde,
+// que es justo lo que se consulta cuando no cuadra la terminal.
+function describeOrderPayments(order) {
+  const list = order.payments || [];
+  if (list.length > 1) {
+    return list.map((p) => `${PAYMENT_LABELS[p.method] || p.method} ${money(p.amount)}`).join(' + ');
+  }
+  const method = list[0]?.method || order.payment_method;
+  return PAYMENT_LABELS[method] || '—';
+}
+
 async function renderSalesPanel() {
   const body = document.getElementById('salesBody');
   body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando...</div>';
@@ -1174,7 +1288,7 @@ async function renderSalesPanel() {
     const row = document.createElement('div');
     row.className = `sale-row ${isCancelled ? 'cancelled' : ''}`;
     const when = new Date(o.created_at).toLocaleString();
-    const pay = o.payment_method === 'card' ? 'Tarjeta' : o.payment_method === 'cash' ? 'Efectivo' : '—';
+    const pay = describeOrderPayments(o);
     row.innerHTML = `
       <div class="sr-info">
         <div class="sr-ticket">${o.local_ticket}</div>
