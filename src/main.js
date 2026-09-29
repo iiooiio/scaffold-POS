@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 const { autoUpdater } = require('electron-updater');
+const logger = require('./logger');
 const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
@@ -22,6 +23,19 @@ let logoLocalPath = null;
 // Si la caja apunta a una tienda distinta y hay trabajo local sin subir, el sync queda
 // bloqueado hasta que el usuario lo resuelva (ver store-guard.js).
 let storeBlocked = null;
+// Último error de cada sincronización, para poder mostrarlo en Diagnóstico. Antes solo
+// existía en console.error, que en la app empaquetada nadie ve.
+const lastErrors = {};
+let lastSyncAt = null;
+
+function recordSync(step, err) {
+  if (err) {
+    lastErrors[step] = { message: err.message, at: new Date().toISOString() };
+    console.error(`[${step}] fallo:`, err.message);
+  } else {
+    delete lastErrors[step];
+  }
+}
 
 // Descarga el logo una sola vez (no depende del sync de catálogo, es un archivo aparte).
 // Si LOGO_URL no está configurado en .env, no hace nada y la UI simplemente no muestra logo.
@@ -91,6 +105,7 @@ function findCachedLogo() {
 }
 
 app.whenReady().then(async () => {
+  logger.install();
   getDb(); // fuerza creación de tablas al arrancar
 
   // Respaldo al arrancar: es el momento con menos escritura en curso y garantiza al
@@ -132,25 +147,29 @@ app.whenReady().then(async () => {
   setInterval(async () => {
     if (!config.isConfigured()) return;
     if (storeBlocked) return; // apunta a otra tienda y hay trabajo local sin subir
+    lastSyncAt = new Date().toISOString();
     try {
       await syncCatalog();
+      recordSync('catalogo', null);
     } catch (err) {
-      console.error('[sync catálogo] fallo (probablemente sin conexión):', err.message);
+      recordSync('catalogo', err);
     }
     // Los clientes creados sin conexión van PRIMERO: una orden que referencia un
     // cliente aún inexistente en Woo falla al enviarse.
     try {
       await flushPendingCustomers();
+      recordSync('clientes-pendientes', null);
     } catch (err) {
-      console.error('[sync clientes pendientes] fallo:', err.message);
+      recordSync('clientes-pendientes', err);
     }
     try {
       const result = await flushPendingOrders();
       if (result.attempted > 0) {
         mainWindow?.webContents.send('queue:updated', result);
       }
+      recordSync('ordenes', null);
     } catch (err) {
-      console.error('[sync órdenes] fallo:', err.message);
+      recordSync('ordenes', err);
     }
     try {
       await flushPendingCancellations();
@@ -293,6 +312,36 @@ ipcMain.handle('maintenance:backup-now', async () => createBackup('manual'));
 ipcMain.handle('maintenance:cleanup', async () => cleanupCache());
 ipcMain.handle('maintenance:open-backups', async () => shell.openPath(backupDir()));
 ipcMain.handle('maintenance:store-status', () => ({ ...getStoreStatus(), blocked: storeBlocked }));
+ipcMain.handle('maintenance:diagnostics', () => {
+  // Cada bloque va en su propio try: si uno truena, los demás siguen informando. Un
+  // diagnóstico que se cae por un solo dato roto no sirve para nada.
+  const out = { lastSyncAt, lastErrors, logPath: logger.getLogPath() };
+
+  try {
+    out.config = { configured: config.isConfigured(), storeURL: config.wcBaseUrl, registerID: config.registerId };
+  } catch (err) { out.configError = err.message; }
+
+  try {
+    out.store = { ...getStoreStatus(), blocked: Boolean(storeBlocked) };
+  } catch (err) { out.storeError = err.message; }
+
+  try {
+    const db = getDb();
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all().map((r) => r.name);
+    out.tables = tables;
+    out.counts = {};
+    for (const t of ['products', 'product_variations', 'customers', 'coupons', 'orders_queue']) {
+      try { out.counts[t] = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n; }
+      catch (err) { out.counts[t] = `ERROR: ${err.message}`; }
+    }
+    const cursor = db.prepare(`SELECT value FROM sync_meta WHERE key = 'products_last_sync'`).get();
+    out.syncCursor = cursor ? cursor.value : null;
+  } catch (err) { out.dbError = err.message; }
+
+  out.log = logger.getRecentLines(60);
+  return out;
+});
+ipcMain.handle('maintenance:open-logs', async () => shell.openPath(logger.logDir()));
 ipcMain.handle('maintenance:force-resync', async () => {
   const result = await forceFullResync();
   // Tras el reset, se sincroniza de inmediato para no dejar el catálogo vacío.
