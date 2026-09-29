@@ -19,8 +19,11 @@ contextBridge.exposeInMainWorld('pos', {
   getCustomers: (search) => ipcRenderer.invoke('customers:get', { search }),
   syncCustomersNow: () => ipcRenderer.invoke('customers:sync-now'),
   createCustomer: (data) => ipcRenderer.invoke('customers:create', data),
-  checkout: (cartItems, paymentMethod, cashInfo, note, customerId) =>
-    ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo, note, customerId }),
+  updateCustomer: (id, data) => ipcRenderer.invoke('customers:update', { id, data }),
+  evaluateCoupon: (code, cartLines) => ipcRenderer.invoke('coupons:evaluate', { code, cartLines }),
+  syncCouponsNow: () => ipcRenderer.invoke('coupons:sync-now'),
+  checkout: (cartItems, paymentMethod, cashInfo, note, customerId, couponCode) =>
+    ipcRenderer.invoke('order:checkout', { cartItems, paymentMethod, cashInfo, note, customerId, couponCode }),
   syncQueueNow: () => ipcRenderer.invoke('queue:sync-now'),
   getQueueSummary: () => ipcRenderer.invoke('queue:summary'),
   getQueueErrors: () => ipcRenderer.invoke('queue:errors'),
@@ -41,5 +44,10 @@ contextBridge.exposeInMainWorld('pos', {
   backupNow: () => ipcRenderer.invoke('maintenance:backup-now'),
   cleanupCache: () => ipcRenderer.invoke('maintenance:cleanup'),
   openBackupsFolder: () => ipcRenderer.invoke('maintenance:open-backups'),
+  queueReceipt: (data) => ipcRenderer.invoke('receiving:queue', data),
+  getRecentReceipts: () => ipcRenderer.invoke('receiving:recent'),
+  syncReceiptsNow: () => ipcRenderer.invoke('receiving:sync-now'),
+  printLabels: (data) => ipcRenderer.invoke('print:labels', data),
+  previewLabelZpl: (sample) => ipcRenderer.invoke('print:label-preview', sample),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
 });
