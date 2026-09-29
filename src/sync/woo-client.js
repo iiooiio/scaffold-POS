@@ -148,6 +148,40 @@ async function fetchAllIds(resource) {
   return ids;
 }
 
+// Lectura y escritura de stock. Se hace leer-modificar-escribir porque la REST API de
+// WooCommerce no tiene un endpoint de "sumar N al stock"; solo acepta el valor absoluto.
+async function getProductStock(productId, variationId = null) {
+  const path = variationId
+    ? `/products/${productId}/variations/${variationId}`
+    : `/products/${productId}`;
+  const data = await wcGet(path, { _fields: 'id,stock_quantity,manage_stock' });
+  return { stock_quantity: data.stock_quantity, manage_stock: Boolean(data.manage_stock) };
+}
+
+async function setProductStock(productId, variationId, stockQuantity) {
+  const path = variationId
+    ? `/products/${productId}/variations/${variationId}`
+    : `/products/${productId}`;
+  return wcPut(path, { manage_stock: true, stock_quantity: stockQuantity });
+}
+
+async function updateCustomer(wooCustomerId, payload) {
+  return wcPut(`/customers/${wooCustomerId}`, payload);
+}
+
+async function fetchAllCoupons() {
+  const perPage = 100;
+  let page = 1;
+  const all = [];
+  while (true) {
+    const batch = await wcGet('/coupons', { per_page: perPage, page });
+    all.push(...batch);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+  return all;
+}
+
 async function createCustomer(customerPayload) {
   return wcPost('/customers', customerPayload);
 }
@@ -167,4 +201,4 @@ async function isOnline() {
   }
 }
 
-module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, createOrder, cancelWooOrder, getOrder, createRefund, fetchAllIds, isOnline };
+module.exports = { fetchAllProducts, fetchProductVariations, fetchAllCustomers, createCustomer, updateCustomer, getProductStock, setProductStock, fetchAllCoupons, createOrder, cancelWooOrder, getOrder, createRefund, fetchAllIds, isOnline };
