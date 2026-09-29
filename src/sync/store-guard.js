@@ -39,7 +39,18 @@ function setStoredSite(db, url) {
 // creándose en la tienda nueva; el resultado reporta cuántos son para que no sea una
 // sorpresa.
 function pendingWorkSummary(db) {
-  const one = (sql) => db.prepare(sql).get().n;
+  // Cada conteo va en su propio try. Si una tabla o columna no existe (base creada por
+  // una versión anterior, archivo sin actualizar), devuelve 0 en vez de lanzar: esta
+  // función alimenta el panel de Mantenimiento, y una excepción aquí lo dejaba pegado en
+  // "Cargando..." sin decir por qué.
+  const one = (sql) => {
+    try {
+      return db.prepare(sql).get().n;
+    } catch (err) {
+      console.error('[tienda] no se pudo contar pendientes:', err.message);
+      return 0;
+    }
+  };
 
   const orders = one(`SELECT COUNT(*) AS n FROM orders_queue WHERE status IN ('pending', 'error')`);
   const cancellations = one(`SELECT COUNT(*) AS n FROM orders_queue WHERE status = 'cancel_pending'`);
@@ -102,9 +113,26 @@ async function ensureStoreMatches() {
 
   const stored = getStoredSite(db);
 
-  // Primera vez que se registra la tienda (o base creada antes de que existiera esta
-  // verificación): solo se anota, no se borra nada.
+  // Primera vez que se registra la tienda: puede ser una base nueva (nada que hacer) o
+  // una base que YA traía datos de una tienda anterior, creada antes de que existiera
+  // esta verificación. En el segundo caso no hay forma de saber de qué tienda es ese
+  // catálogo, y dejarlo tal cual es justo lo que hacía que la caja siguiera mostrando
+  // productos de dev con un cursor viejo que impedía traer los de producción.
+  //
+  // Se limpia. El catálogo, los clientes y los cupones se pueden volver a traer de la
+  // tienda; las ventas no se tocan.
   if (!stored) {
+    const hasData = db.prepare(`SELECT COUNT(*) AS n FROM products`).get().n > 0;
+    const hasCursor = db.prepare(`SELECT 1 FROM sync_meta WHERE key = 'products_last_sync'`).get();
+
+    if (hasData || hasCursor) {
+      const backup = await createBackup('tienda-desconocida');
+      const result = wipeStoreCache(db);
+      setStoredSite(db, current);
+      console.log('[tienda] caché de origen desconocido: se limpió y se forzó sync completo');
+      return { changed: true, blocked: false, recovered: true, current, backup: backup.path, ...result };
+    }
+
     setStoredSite(db, current);
     return { changed: false, initialized: true };
   }
