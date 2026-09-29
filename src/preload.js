@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('pos', {
   openBackupsFolder: () => ipcRenderer.invoke('maintenance:open-backups'),
   getStoreStatus: () => ipcRenderer.invoke('maintenance:store-status'),
   forceFullResync: () => ipcRenderer.invoke('maintenance:force-resync'),
+  getDiagnostics: () => ipcRenderer.invoke('maintenance:diagnostics'),
+  openLogsFolder: () => ipcRenderer.invoke('maintenance:open-logs'),
   queueReceipt: (data) => ipcRenderer.invoke('receiving:queue', data),
   getRecentReceipts: () => ipcRenderer.invoke('receiving:recent'),
   syncReceiptsNow: () => ipcRenderer.invoke('receiving:sync-now'),
