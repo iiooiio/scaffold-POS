@@ -56,6 +56,8 @@
   #railLogo {
     width: 100%;
     height: auto;
+    /* object-fit sigue aquí por si el logo es más alto que ancho: evita que se deforme
+       al estirarlo al ancho del riel. */
     object-fit: contain;
   }
   #rail .status-row {
@@ -349,6 +351,49 @@
     margin: 4px 0 10px;
   }
   #cashRow.show { display: flex; }
+
+  /* Pago dividido */
+  #splitRow {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    margin: 4px 0 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+  }
+  #splitRow.show { display: flex; }
+  .split-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .split-line label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .split-input {
+    width: 120px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 15px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .split-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #splitRemaining {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border);
+  }
+  #splitRemaining.off #splitRemainingAmount { color: var(--warn); }
+  #splitRemaining.ok #splitRemainingAmount { color: var(--accent); }
   .cash-label { font-size: 12px; color: var(--ink-soft); }
   #cashPills {
     display: flex;
@@ -1473,6 +1518,22 @@
       <div id="paymentRow">
         <button class="pay-btn active" data-method="cash">Efectivo</button>
         <button class="pay-btn" data-method="card">Tarjeta</button>
+        <button class="pay-btn" data-method="split">Dividido</button>
+      </div>
+
+      <div id="splitRow">
+        <div class="split-line">
+          <label for="splitCash">Efectivo</label>
+          <input id="splitCash" class="split-input" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="split-line">
+          <label for="splitCard">Tarjeta</label>
+          <input id="splitCard" class="split-input" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div id="splitRemaining">
+          <span>Falta asignar</span>
+          <span id="splitRemainingAmount">$0.00</span>
+        </div>
       </div>
 
       <div id="cashRow">
