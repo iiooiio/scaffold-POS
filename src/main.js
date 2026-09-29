@@ -7,8 +7,11 @@ const config = require('./config');
 const { getDb } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations, refundOrderItems, getOrderRefundState, flushPendingRefunds } = require('./sync/order-sync');
-const { syncCustomers, getLocalCustomers, createLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
+const { syncCustomers, getLocalCustomers, createLocalCustomer, updateLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
+const { syncCoupons, evaluateCoupon } = require('./sync/coupon-sync');
+const { queueReceipt, flushPendingReceipts, getRecentReceipts } = require('./sync/receiving');
 const { printTicket, printCashReport, printCancellation, printPartialRefund } = require('./print/printer');
+const { printLabels, previewLabelZpl } = require('./print/label-printer');
 const cash = require('./cash/cash-session');
 const { createBackup, listBackups, backupDir } = require('./db/backup');
 const { cleanupCache, getCacheStats } = require('./db/cleanup');
@@ -139,12 +142,19 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.error('[sync devoluciones] fallo:', err.message);
     }
+    try {
+      await flushPendingReceipts();
+    } catch (err) {
+      console.error('[sync recepciones] fallo:', err.message);
+    }
   }, config.syncIntervalMs);
 
   // Intervalo aparte para clientes, más espaciado -- ver comentario en config.js.
   const runCustomerSync = () => {
     if (!config.isConfigured()) return;
     syncCustomers().catch((err) => console.error('[sync clientes] fallo:', err.message));
+    // Los cupones cambian poco; van en el mismo intervalo espaciado que los clientes.
+    syncCoupons().catch((err) => console.error('[sync cupones] fallo:', err.message));
   };
   runCustomerSync();
   setInterval(runCustomerSync, config.customersSyncIntervalMs);
@@ -206,8 +216,11 @@ ipcMain.handle('catalog:get-variations', async (_e, productId) =>
 ipcMain.handle('customers:get', async (_e, { search } = {}) => getLocalCustomers({ search }));
 ipcMain.handle('customers:sync-now', async () => syncCustomers());
 ipcMain.handle('customers:create', async (_e, data) => createLocalCustomer(data));
+ipcMain.handle('customers:update', async (_e, { id, data }) => updateLocalCustomer(id, data));
+ipcMain.handle('coupons:evaluate', (_e, { code, cartLines }) => evaluateCoupon(code, cartLines));
+ipcMain.handle('coupons:sync-now', async () => syncCoupons());
 
-ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId }) => {
+ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId, couponCode }) => {
   // El corte de caja solo sirve si TODA venta queda ligada a un turno. Sin sesión
   // abierta no se cobra -- si no, el efectivo del cajón nunca cuadraría.
   const session = cash.getOpenSession();
@@ -217,7 +230,7 @@ ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo
   const total = cartItems.reduce((sum, i) => sum + (i.line_total ?? i.price * i.quantity), 0);
   const { localTicket } = queueOrder({
     cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId,
-    cashSessionId: session.id,
+    cashSessionId: session.id, couponCode,
   });
 
   // Se imprime de inmediato, sin esperar a que sincronice con WooCommerce.
@@ -258,6 +271,14 @@ ipcMain.handle('maintenance:stats', () => ({
 ipcMain.handle('maintenance:backup-now', async () => createBackup('manual'));
 ipcMain.handle('maintenance:cleanup', async () => cleanupCache());
 ipcMain.handle('maintenance:open-backups', async () => shell.openPath(backupDir()));
+
+ipcMain.handle('receiving:queue', (_e, data) => queueReceipt(data));
+ipcMain.handle('receiving:recent', () => getRecentReceipts());
+ipcMain.handle('receiving:sync-now', async () => flushPendingReceipts());
+ipcMain.handle('print:labels', async (_e, data) => printLabels(data));
+// Devuelve el ZPL sin imprimir, para pegarlo en labelary.com/viewer.html y revisar el
+// diseño de la etiqueta sin tener la impresora enfrente.
+ipcMain.handle('print:label-preview', (_e, sample) => previewLabelZpl(sample));
 
 ipcMain.handle('app:toggle-fullscreen', () => {
   if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
