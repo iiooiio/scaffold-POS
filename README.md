@@ -379,6 +379,124 @@ Protecciones, todas deliberadas:
 - **No borra clientes referenciados por ventas sin sincronizar**: esas ventas fallarían al
   subir.
 
+## Cupones
+
+Botón **🎟 Cupón** en la fila de herramientas del carrito. Se captura el código, se valida
+y se aplica el descuento. Volver a tocarlo lo quita.
+
+Los cupones se sincronizan desde WooCommerce en el mismo intervalo espaciado que los
+clientes, así que **funcionan sin conexión**.
+
+### Decisión importante: el descuento se calcula aquí, no en WooCommerce
+
+La orden **no** lleva `coupon_lines`; el código viaja como meta `_pos_coupon_code`.
+
+Si se mandaran `coupon_lines`, WooCommerce recalcularía los totales por su cuenta e
+ignoraría los `subtotal`/`total` explícitos que enviamos: el ticket impreso y la orden
+dejarían de coincidir, que es justo el problema que este proyecto evita en todo lo demás.
+Y sin conexión sería imposible saber cuánto cobrar.
+
+**Lo que se pierde con esta decisión, y conviene tenerlo claro:**
+
+- El contador de usos del cupón **NO se incrementa** en WooCommerce.
+- `usage_limit` se valida contra el conteo de la ÚLTIMA sincronización, así que un cupón
+  de un solo uso podría aceptarse en dos cajas a la vez.
+- Restricciones que Woo valida del lado del servidor (por cliente, por rol, correos
+  permitidos) no se replican aquí.
+
+Para cupones de marketing masivo esto es aceptable. **Para cupones únicos de alto valor,
+no los uses en el POS.**
+
+### Qué sí se valida localmente
+
+Vigencia, límite de usos (al corte del último sync), compra mínima y máxima, productos
+incluidos y excluidos. Tipos soportados: `percent`, `fixed_cart` y `fixed_product`
+(monto fijo por pieza elegible). El descuento nunca excede la base elegible.
+
+Orden de aplicación en el carrito: descuento de línea → cupón → descuento manual de
+ticket.
+
+## Editar clientes
+
+Botón **Editar** en cada renglón del buscador de clientes. Reutiliza el mismo formulario
+que la creación.
+
+**El correo no se regenera aunque cambie el nombre**: en WooCommerce el email es la
+identidad del cliente, y cambiarlo rompería la liga con sus pedidos anteriores.
+
+Sin conexión el cambio se guarda local y se marca como pendiente; se empuja a Woo en el
+siguiente ciclo. Mientras esté pendiente, el sync completo de clientes **no pisa** ese
+registro — si lo hiciera, traería los datos viejos de Woo y borraría la edición del
+cajero.
+
+## Recibir mercancía (sin orden de compra)
+
+Botón **Recibir mercancía** en el riel. Escaneas el código o buscas por nombre/SKU,
+ajustas cantidades, agregas una nota (remisión, proveedor) y confirmas. Funciona sin
+conexión: se encola y se aplica en WooCommerce al sincronizar.
+
+El stock local se actualiza de inmediato para que el catálogo del POS muestre la
+existencia nueva aunque todavía no haya subido.
+
+**LIMITACIÓN CONOCIDA — condición de carrera**: la REST API de WooCommerce no tiene
+"sumar N al stock", solo acepta el valor absoluto. Así que se lee el stock actual y se
+escribe la suma. Si otra caja o la tienda en línea vende ese producto entre la lectura y
+la escritura, ese movimiento se pierde. La ventana es de milisegundos, pero existe.
+
+Cada línea se marca `applied` por separado, así que **un reintento nunca vuelve a sumar
+una línea que ya se aplicó** (probado: si una línea falla y otra pasa, el reintento solo
+completa la que faltaba).
+
+Los productos variables requieren elegir la variación: el producto padre no tiene stock
+propio.
+
+## Etiquetas con código de barras (ZPL)
+
+Al pasar el mouse sobre un producto del catálogo aparece un botón 🏷. Elige cuántas
+etiquetas y salen con nombre, precio y código de barras Code128 del SKU.
+
+### Es otra impresora, no la de tickets
+
+Las impresoras de etiquetas (Zebra, TSC, Godex, Qian y compatibles) **no hablan
+ESC/POS**. Hablan ZPL. Por eso esto NO usa `node-thermal-printer`: vive en
+`src/print/label-printer.js` y genera ZPL crudo.
+
+ZPL II lo emulan muchas impresoras de otros fabricantes, así que no te amarra a Zebra.
+
+### Conexión
+
+**Por red (recomendado)**: puerto 9100, que es el puerto RAW estándar. Funciona sin
+importar el sistema operativo, no depende del spooler de Windows ni de drivers, y no
+necesita dependencias nativas. Se configura en Ajustes con la IP de la impresora.
+
+Asigna IP fija a la impresora y abre el puerto 9100 en el firewall; una IP dinámica que
+cambia es la causa más común de que deje de imprimir de un día para otro.
+
+**Por USB**: elige "USB compartida en Windows", comparte la impresora en Windows con un
+nombre y ponlo en Ajustes. Se le copia el archivo crudo al recurso compartido. Funciona,
+pero la de red es más confiable.
+
+### Revisar el diseño sin tener la impresora
+
+En Ajustes hay un botón **"Ver el ZPL de una etiqueta de ejemplo"**: copia el ZPL al
+portapapeles para que lo pegues en `labelary.com/viewer.html` y veas la etiqueta
+renderizada. Sirve para ajustar tamaños antes de comprar hardware.
+
+### Lo que sí está verificado
+
+El generador de ZPL se probó por separado (no en hardware):
+
+- El layout cabe completo en 50x25, 40x30, 32x25 a 203 dpi y en 50x25 a 300 dpi
+  (la primera versión tenía un bug: el código de barras se salía de la etiqueta).
+- Acentos preservados con `^CI28` (UTF-8). Sin eso, los nombres en español salen rotos.
+- Las copias se piden con `^PQ`, o sea las genera el firmware de la impresora sin
+  reenviar el ZPL N veces.
+- Los caracteres de control de ZPL (`^`, `~`, `\`) en el nombre del producto se sanean,
+  así que un nombre con `^XZ` no rompe la etiqueta.
+
+**Sin verificar**: el resultado físico. El tamaño de etiqueta, el DPI y la calibración
+del sensor de troquel dependen de tu impresora y tu rollo.
+
 ## Qué NO cubre (pendiente, a propósito)
 
 - **Productos variables/variaciones** — ✅ resuelto: hay tabla `product_variations`,
