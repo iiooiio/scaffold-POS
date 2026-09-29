@@ -7,7 +7,7 @@ const logger = require('./logger');
 const config = require('./config');
 const { getDb, verifySchema } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
-const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations, refundOrderItems, getOrderRefundState, flushPendingRefunds } = require('./sync/order-sync');
+const { queueOrder, getOrderPayments, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations, refundOrderItems, getOrderRefundState, flushPendingRefunds } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers, createLocalCustomer, updateLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
 const { syncCoupons, evaluateCoupon } = require('./sync/coupon-sync');
 const { queueReceipt, flushPendingReceipts, getRecentReceipts } = require('./sync/receiving');
@@ -277,22 +277,25 @@ ipcMain.handle('customers:update', async (_e, { id, data }) => updateLocalCustom
 ipcMain.handle('coupons:evaluate', (_e, { code, cartLines }) => evaluateCoupon(code, cartLines));
 ipcMain.handle('coupons:sync-now', async () => syncCoupons());
 
-ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, cashInfo, note, customerId, couponCode }) => {
+ipcMain.handle('order:checkout', async (_e, { cartItems, paymentMethod, payments, cashInfo, note, customerId, couponCode }) => {
   // El corte de caja solo sirve si TODA venta queda ligada a un turno. Sin sesión
   // abierta no se cobra -- si no, el efectivo del cajón nunca cuadraría.
   const session = cash.getOpenSession();
   if (!session) throw new Error('No hay caja abierta. Abre la caja antes de cobrar.');
 
-  // line_total ya trae el descuento aplicado (lo calcula computeCart en el renderer).
-  const total = cartItems.reduce((sum, i) => sum + (i.line_total ?? i.price * i.quantity), 0);
-  const { localTicket } = queueOrder({
-    cartItems, paymentMethod, cashInfo, customerNote: note || '', customerId,
+  // queueOrder valida que los pagos sumen el total y lanza si no. Se deja propagar a
+  // propósito: una venta cuyos pagos no cuadran no debe guardarse ni imprimirse.
+  const queued = queueOrder({
+    cartItems, paymentMethod, payments, cashInfo, customerNote: note || '', customerId,
     cashSessionId: session.id, couponCode,
   });
+  const { localTicket, total } = queued;
 
   // Se imprime de inmediato, sin esperar a que sincronice con WooCommerce.
   try {
-    await printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo, note });
+    await printTicket({
+      localTicket, cartItems, total, paymentMethod, payments: queued.payments, cashInfo, note,
+    });
   } catch (err) {
     // La venta ya quedó guardada en la cola aunque falle la impresión.
     return { localTicket, total, printed: false, printError: err.message };
@@ -412,6 +415,7 @@ ipcMain.handle('order:refund', async (_e, { orderId, items, reason }) => {
         total: result.amount,
         reason,
         paymentMethod: result.payment_method,
+        payments: result.payments,
       });
     } else {
       await printPartialRefund({
@@ -420,6 +424,7 @@ ipcMain.handle('order:refund', async (_e, { orderId, items, reason }) => {
         amount: result.amount,
         reason,
         paymentMethod: result.payment_method,
+        payments: result.payments,
       });
     }
     return { ...result, printed: true };
@@ -453,6 +458,9 @@ ipcMain.handle('order:cancel', async (_e, { orderId, reason }) => {
       total: result.total,
       reason,
       paymentMethod: result.payment_method,
+      // La cancelación devuelve TODO, así que a cada método se le regresa exactamente lo
+      // que se le cobró: el desglose original sirve tal cual.
+      payments: getOrderPayments(orderId),
     });
     return { ok: true, needsSync: result.needsSync, printed: true };
   } catch (err) {
