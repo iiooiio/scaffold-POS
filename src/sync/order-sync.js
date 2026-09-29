@@ -7,7 +7,7 @@ const config = require('../config');
 // cashInfo: { received, change } -- solo relevante si paymentMethod === 'cash'
 // Construye el payload en formato WooCommerce y lo guarda en la cola local.
 // Devuelve el ticket local de inmediato (no espera red) para poder imprimir ya.
-function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo, customerId, cashSessionId = null }) {
+function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cashInfo, customerId, cashSessionId = null, couponCode = null }) {
   const db = getDb();
   const localTicket = nextLocalTicket(config.registerId);
   const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -28,6 +28,12 @@ function queueOrder({ cartItems, customerNote = '', paymentMethod = 'cash', cash
   // campos acompañantes.
   if (config.orderAttribution && config.orderAttribution !== 'none') {
     metaData.push({ key: '_wc_order_attribution_source_type', value: config.orderAttribution });
+  }
+  // El código va como meta, NO como coupon_lines: si se mandaran coupon_lines,
+  // WooCommerce recalcularía los totales por su cuenta e ignoraría los subtotal/total
+  // explícitos, dejando el ticket y la orden con montos distintos. Ver coupon-sync.js.
+  if (couponCode) {
+    metaData.push({ key: '_pos_coupon_code', value: couponCode });
   }
   if (paymentMethod === 'cash' && cashInfo) {
     metaData.push({ key: '_pos_cash_received', value: String(cashInfo.received) });
