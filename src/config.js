@@ -65,6 +65,19 @@ function reload() {
   //   'none'       -> no manda nada de atribución (lo más seguro si algo se rompe).
   // NO usar 'utm': hace que Woo intente renderizar utm_campaign/device_type/
   // session_page_views y truena el detalle de la orden y el historial del cliente.
+  // --- Impresora de ETIQUETAS (ZPL). Es una máquina distinta a la de tickets: las
+  // impresoras de etiquetas no hablan ESC/POS.
+  //   tcp           -> puerto RAW 9100 (recomendado; no depende del spooler de Windows)
+  //   windows-share -> impresora solo-USB compartida en Windows
+  config.labelTransport = get('LABEL_PRINTER_TRANSPORT', 'tcp');
+  config.labelHost = get('LABEL_PRINTER_HOST', '');
+  config.labelPort = parseInt(get('LABEL_PRINTER_PORT', '9100'), 10);
+  config.labelShare = get('LABEL_PRINTER_SHARE', '');
+  config.labelDpi = parseInt(get('LABEL_DPI', '203'), 10);
+  config.labelWidthMm = parseFloat(get('LABEL_WIDTH_MM', '50'));
+  config.labelHeightMm = parseFloat(get('LABEL_HEIGHT_MM', '25'));
+  config.labelTimeoutMs = parseInt(get('LABEL_TIMEOUT_MS', '5000'), 10);
+
   config.orderAttribution = get('ORDER_ATTRIBUTION', 'mobile_app');
   config.posEmailDomain = get('POS_EMAIL_DOMAIN', 'pos.com');
   config.priceAdjustmentPercent = parseFloat(get('PRICE_ADJUSTMENT_PERCENT', '0')) || 0;
@@ -88,6 +101,13 @@ function getEditableConfig() {
     LOGO_URL: config.logoUrl || '',
     PRINTER_INTERFACE: config.printerInterface,
     PRICE_ADJUSTMENT_PERCENT: String(config.priceAdjustmentPercent),
+    LABEL_PRINTER_TRANSPORT: config.labelTransport,
+    LABEL_PRINTER_HOST: config.labelHost,
+    LABEL_PRINTER_PORT: String(config.labelPort),
+    LABEL_PRINTER_SHARE: config.labelShare,
+    LABEL_WIDTH_MM: String(config.labelWidthMm),
+    LABEL_HEIGHT_MM: String(config.labelHeightMm),
+    LABEL_DPI: String(config.labelDpi),
   };
 }
 
