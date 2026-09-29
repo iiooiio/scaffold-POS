@@ -1103,6 +1103,7 @@ document.getElementById('btnCloseCash').addEventListener('click', () => {
 
 // Orden por z-index descendente: Esc cierra el modal de arriba, no todos a la vez.
 const OVERLAYS_TOP_FIRST = [
+  'diagnosticsOverlay',
   'settingsOverlay',
   'labelOverlay',
   'receivingOverlay',
@@ -1638,8 +1639,25 @@ async function renderMaintenancePanel() {
   const body = document.getElementById('maintenanceBody');
   body.innerHTML = '<div style="font-size:13px; color:var(--ink-soft);">Cargando...</div>';
 
-  const { cache, backups, backupDir } = await window.pos.getMaintenanceStats();
-  const store = await window.pos.getStoreStatus();
+  // Sin este try, cualquier rechazo dejaba el panel pegado en "Cargando..." sin decir
+  // nada, que es exactamente lo que pasó y nos dejó sin forma de diagnosticar.
+  let cache, backups, backupDir, store;
+  try {
+    ({ cache, backups, backupDir } = await window.pos.getMaintenanceStats());
+    store = await window.pos.getStoreStatus();
+  } catch (err) {
+    body.innerHTML = `
+      <div class="store-alert">
+        <strong>No se pudo cargar el mantenimiento</strong>
+        <div>${err.message}</div>
+        <div style="margin-top:6px;">Abre el diagnóstico para ver el detalle, o presiona
+        Ctrl+Shift+I para la consola.</div>
+      </div>
+      <button class="cash-action-btn secondary" id="btnDiagnosticsFallback">Ver diagnóstico</button>
+    `;
+    document.getElementById('btnDiagnosticsFallback').onclick = openDiagnostics;
+    return;
+  }
 
   const storeChanged = store.stored && store.current && store.stored !== store.current;
 
@@ -1687,6 +1705,11 @@ async function renderMaintenancePanel() {
     traer desde cero. Úsalo si cambiaste de tienda o si el catálogo quedó desfasado. Las ventas NO se tocan.</div>
     <button class="cash-action-btn secondary" id="btnForceResync">Forzar resincronización completa</button>
 
+    <div class="cash-section-title">Diagnóstico</div>
+    <div class="subtitle">Estado real de la conexión, la base y los últimos errores de sincronización.</div>
+    <button class="cash-action-btn secondary" id="btnDiagnostics">Ver diagnóstico</button>
+    <button class="cash-action-btn secondary" id="btnOpenLogs">Abrir carpeta de logs</button>
+
     <div class="cash-section-title">Limpiar caché</div>
     <div class="subtitle">Borra de esta caja los productos y clientes que ya no existen en
     la tienda en línea, más las imágenes sueltas. Las ventas NO se tocan.</div>
@@ -1706,6 +1729,8 @@ async function renderMaintenancePanel() {
   };
 
   document.getElementById('btnOpenBackups').onclick = () => window.pos.openBackupsFolder();
+  document.getElementById('btnDiagnostics').onclick = openDiagnostics;
+  document.getElementById('btnOpenLogs').onclick = () => window.pos.openLogsFolder();
 
   document.getElementById('btnForceResync').onclick = async (e) => {
     if (!confirm('Se hará un respaldo, se borrará el catálogo/clientes/cupones locales y se volverán a traer desde cero.\n\nLas ventas no se tocan. ¿Continuar?')) return;
@@ -1735,6 +1760,62 @@ async function renderMaintenancePanel() {
     renderMaintenancePanel();
   };
 }
+
+// Diagnóstico: lo que hace falta para saber POR QUÉ algo no funciona, sin consola.
+async function openDiagnostics() {
+  const overlay = document.getElementById('diagnosticsOverlay');
+  const body = document.getElementById('diagnosticsBody');
+  overlay.classList.add('show');
+  body.textContent = 'Cargando...';
+
+  try {
+    const d = await window.pos.getDiagnostics();
+    const errores = Object.entries(d.lastErrors || {});
+    const lineas = [
+      '=== CONFIGURACIÓN ===',
+      `Configurada:     ${d.config?.configured}`,
+      `Tienda:          ${d.config?.storeURL || '(sin configurar)'}`,
+      `Caja:            ${d.config?.registerID}`,
+      '',
+      '=== TIENDA ===',
+      `Registrada en BD: ${d.store?.stored || '(ninguna)'}`,
+      `Apuntando ahora:  ${d.store?.current || '(ninguna)'}`,
+      `Sync bloqueado:   ${d.store?.blocked}`,
+      `Cursor de sync:   ${d.syncCursor || '(vacío = traerá catálogo completo)'}`,
+      '',
+      '=== BASE DE DATOS ===',
+      ...Object.entries(d.counts || {}).map(([t, n]) => `${t.padEnd(20)} ${n}`),
+      d.dbError ? `ERROR DE BASE: ${d.dbError}` : '',
+      '',
+      '=== ÚLTIMA SINCRONIZACIÓN ===',
+      `Intento:  ${d.lastSyncAt || 'nunca'}`,
+      errores.length
+        ? errores.map(([k, v]) => `FALLO ${k}: ${v.message}`).join('\n')
+        : 'Sin errores registrados',
+      '',
+      '=== LOG RECIENTE ===',
+      ...(d.log || []),
+      '',
+      `Archivo de log: ${d.logPath}`,
+    ];
+    body.textContent = lineas.filter((l) => l !== '').join('\n');
+  } catch (err) {
+    body.textContent = `No se pudo obtener el diagnóstico:\n${err.message}`;
+  }
+}
+
+document.getElementById('btnCloseDiagnostics').addEventListener('click', () => {
+  document.getElementById('diagnosticsOverlay').classList.remove('show');
+});
+
+document.getElementById('btnCopyDiagnostics').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('diagnosticsBody').textContent);
+    showToast('Diagnóstico copiado.');
+  } catch (err) {
+    showToast(`No se pudo copiar: ${err.message}`, true);
+  }
+});
 
 document.getElementById('btnMaintenance').addEventListener('click', () => {
   document.getElementById('maintenanceOverlay').classList.add('show');
@@ -1878,7 +1959,7 @@ document.addEventListener('keydown', (e) => {
   // No interferir con modales abiertos ni con escritura manual en campos de texto
   // libre (nota, motivo de movimiento, ajustes).
   const anyOverlayOpen = document.querySelector(
-    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show, #maintenanceOverlay.show, #receivingOverlay.show, #labelOverlay.show'
+    '#errorOverlay.show, #variationOverlay.show, #customerOverlay.show, #cashOverlay.show, #salesOverlay.show, #settingsOverlay.show, #customOverlay.show, #refundOverlay.show, #discountOverlay.show, #maintenanceOverlay.show, #receivingOverlay.show, #labelOverlay.show, #diagnosticsOverlay.show'
   );
   if (anyOverlayOpen) return;
 
