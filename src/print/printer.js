@@ -16,7 +16,33 @@ function buildPrinter() {
   });
 }
 
-async function printTicket({ localTicket, cartItems, total, paymentMethod, cashInfo, note, isReprint = false }) {
+const PAYMENT_LABELS = { cash: 'Efectivo', card: 'Tarjeta' };
+
+// Normaliza a [{ method, amount }]. Las ventas anteriores a los pagos divididos no traen
+// desglose, solo `paymentMethod`: se les arma uno de un renglón para que la reimpresión
+// de un ticket viejo se siga viendo igual que el original.
+function asPaymentList({ payments, paymentMethod, total }) {
+  if (Array.isArray(payments) && payments.length > 0) return payments;
+  return [{ method: paymentMethod === 'card' ? 'card' : 'cash', amount: total || 0 }];
+}
+
+// Un solo método se imprime en una línea, como siempre. Varios se desglosan con su monto:
+// sin el monto el cliente no puede verificar cuánto se le cargó a la tarjeta.
+//
+// El encabezado del caso dividido se pasa aparte porque no siempre es la misma frase: en
+// el ticket es "Pago: dividido" y en una devolución es "Se devuelve en:".
+function printPaymentBreakdown(thermalPrinter, list, singleLabel, multiHeader) {
+  if (list.length === 1) {
+    thermalPrinter.println(`${singleLabel}: ${PAYMENT_LABELS[list[0].method] || list[0].method}`);
+    return;
+  }
+  thermalPrinter.println(multiHeader);
+  for (const p of list) {
+    thermalPrinter.println(`  ${PAYMENT_LABELS[p.method] || p.method}: $${(p.amount || 0).toFixed(2)}`);
+  }
+}
+
+async function printTicket({ localTicket, cartItems, total, paymentMethod, payments, cashInfo, note, isReprint = false }) {
   const thermalPrinter = buildPrinter();
 
   const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
@@ -63,9 +89,16 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
     thermalPrinter.println(`Descuento: -$${descuentoTotal.toFixed(2)}`);
   }
   thermalPrinter.println(`TOTAL: $${total.toFixed(2)}`);
-  thermalPrinter.println(`Pago: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
-  if (paymentMethod === 'cash' && cashInfo) {
-    thermalPrinter.println(`Recibido: $${cashInfo.received.toFixed(2)}`);
+
+  const paymentList = asPaymentList({ payments, paymentMethod, total });
+  printPaymentBreakdown(thermalPrinter, paymentList, 'Pago', 'Pago: dividido');
+
+  // "Recibido" y "Cambio" son del efectivo. En un pago dividido se aclara, porque si no
+  // el cliente ve "Recibido: $150" bajo un total de $200 y parece que falta dinero.
+  const hasCash = paymentList.some((p) => p.method === 'cash');
+  if (hasCash && cashInfo) {
+    const suffix = paymentList.length > 1 ? ' en efectivo' : '';
+    thermalPrinter.println(`Recibido${suffix}: $${cashInfo.received.toFixed(2)}`);
     thermalPrinter.println(`Cambio: $${cashInfo.change.toFixed(2)}`);
   }
 
@@ -87,7 +120,7 @@ async function printTicket({ localTicket, cartItems, total, paymentMethod, cashI
 module.exports = { printTicket, printCashReport, printCancellation, printPartialRefund };
 
 // Comprobante de devolución parcial: detalla qué piezas se devolvieron y por cuánto.
-async function printPartialRefund({ localTicket, items, amount, reason, paymentMethod }) {
+async function printPartialRefund({ localTicket, items, amount, reason, paymentMethod, payments }) {
   const thermalPrinter = buildPrinter();
 
   const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
@@ -114,7 +147,13 @@ async function printPartialRefund({ localTicket, items, amount, reason, paymentM
   thermalPrinter.drawLine();
   thermalPrinter.alignRight();
   thermalPrinter.println(`DEVUELTO: $${amount.toFixed(2)}`);
-  thermalPrinter.println(`Pago original: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
+  // En una venta dividida, `payments` ya viene repartido proporcionalmente desde
+  // order-sync: esto es cuánto se le devuelve a CADA método, no cómo se pagó originalmente.
+  printPaymentBreakdown(
+    thermalPrinter,
+    asPaymentList({ payments, paymentMethod, total: amount }),
+    'Se devuelve en', 'Se devuelve en:'
+  );
 
   if (reason && reason.trim()) {
     thermalPrinter.alignLeft();
@@ -132,7 +171,7 @@ async function printPartialRefund({ localTicket, items, amount, reason, paymentM
 }
 
 // Comprobante de cancelación: deja constancia física de que se devolvió el dinero.
-async function printCancellation({ localTicket, total, reason, paymentMethod }) {
+async function printCancellation({ localTicket, total, reason, paymentMethod, payments }) {
   const thermalPrinter = buildPrinter();
 
   const isConnected = await thermalPrinter.isPrinterConnected().catch(() => false);
@@ -150,7 +189,11 @@ async function printCancellation({ localTicket, total, reason, paymentMethod }) 
 
   thermalPrinter.alignLeft();
   thermalPrinter.println(`Monto devuelto: $${(total || 0).toFixed(2)}`);
-  thermalPrinter.println(`Pago original: ${paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`);
+  printPaymentBreakdown(
+    thermalPrinter,
+    asPaymentList({ payments, paymentMethod, total }),
+    'Se devuelve en', 'Se devuelve en:'
+  );
   if (reason && reason.trim()) {
     thermalPrinter.newLine();
     thermalPrinter.println('Motivo:');
