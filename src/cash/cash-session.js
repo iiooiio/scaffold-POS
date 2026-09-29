@@ -1,4 +1,5 @@
 const { getDb } = require('../db/init');
+const { round2, allocateProportionally, mergeByMethod } = require('../money');
 const config = require('../config');
 
 // Sesión de caja = un turno. Solo puede haber UNA abierta por caja a la vez.
@@ -53,33 +54,78 @@ function getSessionSummary(sessionId) {
 
   // Las canceladas NO cuentan: el dinero se le devolvió al cliente, así que no está
   // en el cajón. Se excluyen en cualquier etapa de la cancelación (local o ya en Woo).
-  const notCancelled = `status NOT IN ('cancelled_local', 'cancel_pending', 'cancelled')`;
+  const CANCELLED = ['cancelled_local', 'cancel_pending', 'cancelled'];
 
-  // NETO de devoluciones parciales: si se devolvieron $200 de una venta de $500, en el
-  // cajón quedan $300. Restarlo aquí es lo que hace que el corte cuadre.
-  const cashSales = db.prepare(`
-    SELECT COALESCE(SUM(total - COALESCE(refunded_total, 0)), 0) AS total, COUNT(*) AS count
-    FROM orders_queue
-    WHERE cash_session_id = ? AND payment_method = 'cash' AND ${notCancelled}
-  `).get(sessionId);
+  // El cálculo se hace en JS, no en SQL, porque con pagos divididos deja de ser una suma
+  // directa: hay que repartir la devolución entre los métodos de cada venta.
+  const orders = db.prepare(`
+    SELECT id, total, refunded_total, status FROM orders_queue
+    WHERE cash_session_id = ? ORDER BY id ASC
+  `).all(sessionId);
 
-  const cashRefunds = db.prepare(`
-    SELECT COALESCE(SUM(refunded_total), 0) AS total
-    FROM orders_queue
-    WHERE cash_session_id = ? AND payment_method = 'cash' AND ${notCancelled}
-  `).get(sessionId);
+  // ORDER BY p.id no es cosmético: el reparto de devoluciones deja el redondeo en el
+  // ÚLTIMO renglón, así que un orden distinto movería un centavo de cubeta. Sin el ORDER
+  // BY, SQLite no garantiza ningún orden y el mismo corte podría dar dos resultados.
+  // El iPad ordena igual (POSStore.salesForSession) porque venden contra la misma tienda.
+  const paymentsByOrder = new Map();
+  for (const row of db.prepare(`
+    SELECT p.order_local_id, p.method, p.amount
+    FROM order_payments p
+    JOIN orders_queue o ON o.id = p.order_local_id
+    WHERE o.cash_session_id = ?
+    ORDER BY p.id ASC
+  `).all(sessionId)) {
+    if (!paymentsByOrder.has(row.order_local_id)) paymentsByOrder.set(row.order_local_id, []);
+    paymentsByOrder.get(row.order_local_id).push(row);
+  }
 
-  const cardSales = db.prepare(`
-    SELECT COALESCE(SUM(total - COALESCE(refunded_total, 0)), 0) AS total, COUNT(*) AS count
-    FROM orders_queue
-    WHERE cash_session_id = ? AND payment_method = 'card' AND ${notCancelled}
-  `).get(sessionId);
+  let cashNet = 0, cardNet = 0, cashRefunded = 0;
+  let cashCount = 0, cardCount = 0;
+  let cancelledTotal = 0, cancelledCount = 0;
 
-  const cancelled = db.prepare(`
-    SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count
-    FROM orders_queue
-    WHERE cash_session_id = ? AND status IN ('cancelled_local', 'cancel_pending', 'cancelled')
-  `).get(sessionId);
+  for (const order of orders) {
+    if (CANCELLED.includes(order.status)) {
+      cancelledTotal += order.total || 0;
+      cancelledCount += 1;
+      continue;
+    }
+
+    const payments = mergeByMethod(paymentsByOrder.get(order.id) || []);
+    const total = order.total || 0;
+    const refunded = order.refunded_total || 0;
+
+    // Se reparte lo DEVUELTO y de ahí se resta, en vez de multiplicar cada método por un
+    // factor. Suena equivalente y no lo es:
+    //
+    //   - multiplicando, cada cubeta redondea por su cuenta y las dos juntas pueden sumar
+    //     un centavo más (o menos) de lo que realmente se vendió. En el corte eso aparece
+    //     como un descuadre fantasma que nadie puede explicar.
+    //   - repartiendo, las partes suman exacto y lo retenido es "lo cobrado menos lo
+    //     devuelto", que por construcción cuadra.
+    //
+    // Además usa LA MISMA función que imprime el comprobante de devolución, así que el
+    // papel que se lleva el cliente y el efectivo que falta en el cajón dicen lo mismo.
+    const refundParts = allocateProportionally(payments, total, refunded);
+    const refundByMethod = new Map(refundParts.map((p) => [p.method, p.amount]));
+
+    for (const payment of payments) {
+      const givenBack = refundByMethod.get(payment.method) || 0;
+      const retained = round2(payment.amount - givenBack);
+      if (payment.method === 'card') {
+        cardNet += retained;
+        cardCount += 1;
+      } else {
+        cashNet += retained;
+        cashRefunded += givenBack;
+        cashCount += 1;
+      }
+    }
+  }
+
+  const cashSales = { total: round2(cashNet), count: cashCount };
+  const cardSales = { total: round2(cardNet), count: cardCount };
+  const cashRefunds = { total: round2(cashRefunded) };
+  const cancelled = { total: round2(cancelledTotal), count: cancelledCount };
 
   const movements = db.prepare(`
     SELECT type, COALESCE(SUM(amount), 0) AS total
@@ -89,7 +135,7 @@ function getSessionSummary(sessionId) {
   const cashIn = movements.find((m) => m.type === 'in')?.total || 0;
   const cashOut = movements.find((m) => m.type === 'out')?.total || 0;
 
-  const expected = session.opening_float + cashSales.total + cashIn - cashOut;
+  const expected = round2(session.opening_float + cashSales.total + cashIn - cashOut);
 
   return {
     ...session,
