@@ -5,7 +5,7 @@ const { pathToFileURL } = require('url');
 const { autoUpdater } = require('electron-updater');
 const logger = require('./logger');
 const config = require('./config');
-const { getDb } = require('./db/init');
+const { getDb, verifySchema } = require('./db/init');
 const { syncCatalog, getLocalProducts, getLocalVariations, findBySku } = require('./sync/catalog-sync');
 const { queueOrder, flushPendingOrders, retryOrder, resolveManually, getQueueSummary, getErroredOrders, getRecentOrders, getOrderForReprint, cancelOrder, flushPendingCancellations, refundOrderItems, getOrderRefundState, flushPendingRefunds } = require('./sync/order-sync');
 const { syncCustomers, getLocalCustomers, createLocalCustomer, updateLocalCustomer, flushPendingCustomers } = require('./sync/customer-sync');
@@ -27,6 +27,10 @@ let storeBlocked = null;
 // existía en console.error, que en la app empaquetada nadie ve.
 const lastErrors = {};
 let lastSyncAt = null;
+// Problemas de esquema detectados al arrancar. Un archivo del proyecto que quedó de una
+// versión anterior se manifiesta como "no such table/column" disperso por toda la app;
+// esto lo concentra en un solo aviso.
+let schemaProblems = [];
 
 function recordSync(step, err) {
   if (err) {
@@ -107,6 +111,13 @@ function findCachedLogo() {
 app.whenReady().then(async () => {
   logger.install();
   getDb(); // fuerza creación de tablas al arrancar
+
+  schemaProblems = verifySchema();
+  if (schemaProblems.length > 0) {
+    console.error('[esquema] LA BASE NO COINCIDE CON EL CÓDIGO. Casi siempre significa ' +
+      'que algún archivo de src/ quedó de una versión anterior:');
+    schemaProblems.forEach((p) => console.error('  -', p));
+  }
 
   // Respaldo al arrancar: es el momento con menos escritura en curso y garantiza al
   // menos un punto de retorno por sesión de trabajo.
@@ -205,6 +216,12 @@ app.whenReady().then(async () => {
   if (app.isPackaged) {
     const checkUpdates = () => {
       autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        // No tener releases publicados todavía es lo normal al inicio, no un fallo:
+        // ensuciaba el log con un stack trace cada 4 horas.
+        if (/No published versions/i.test(err.message || '')) {
+          console.log('[auto-update] todavía no hay releases publicados en GitHub');
+          return;
+        }
         console.error('[auto-update] fallo al buscar actualizaciones:', err.message);
       });
     };
@@ -315,7 +332,7 @@ ipcMain.handle('maintenance:store-status', () => ({ ...getStoreStatus(), blocked
 ipcMain.handle('maintenance:diagnostics', () => {
   // Cada bloque va en su propio try: si uno truena, los demás siguen informando. Un
   // diagnóstico que se cae por un solo dato roto no sirve para nada.
-  const out = { lastSyncAt, lastErrors, logPath: logger.getLogPath() };
+  const out = { lastSyncAt, lastErrors, schemaProblems, logPath: logger.getLogPath() };
 
   try {
     out.config = { configured: config.isConfigured(), storeURL: config.wcBaseUrl, registerID: config.registerId };
